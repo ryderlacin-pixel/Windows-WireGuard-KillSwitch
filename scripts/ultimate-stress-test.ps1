@@ -50,7 +50,6 @@ function Invoke-Repair {
     if (Test-Path 'C:\WireGuard\repair.ps1') {
         Start-Process powershell -ArgumentList '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\WireGuard\repair.ps1' -WindowStyle Hidden -EA SilentlyContinue
     }
-    schtasks /Run /TN '\WG-KillSwitch' 2>$null | Out-Null
 }
 function Wait-Healthy([int]$sec = 60) {
     $w = 0
