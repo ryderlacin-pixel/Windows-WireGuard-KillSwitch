@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.7)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.8)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -25,6 +25,8 @@
 # - Block rules cover wireless, LAN, remoteaccess (tethering), and PPP interfaces.
 # - WARP mode refreshes Cloudflare server IPs at runtime; log writes skip if mutex times out.
 # - All layers (monitor/repair/GPO) share SafeToOpen logic; repair syncs firewall state every run.
+# - Install-safe (v10.8): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
+#   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - Test-Internet requires 2 of 3 hosts (1.1.1.1, 1.0.0.1, 8.8.8.8); server rule rewrite only on IP change.
 #
 # If you see WMI and think "overkill": It is intentional.
@@ -65,6 +67,9 @@ $GPO_SCRIPT_DIR = "C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup"
 $GPO_SCRIPT   = "$GPO_SCRIPT_DIR\wg-startup.ps1"
 $GPO_INI_DIR  = "C:\Windows\System32\GroupPolicy\Machine\Scripts"
 $GPO_INI      = "$GPO_INI_DIR\scripts.ini"
+$INSTALL_LOCK = "$INSTALL_DIR\install.inprogress"
+$KURTAR_PS1   = "$INSTALL_DIR\kurtar.ps1"
+$KURTAR_BAT   = "$INSTALL_DIR\kurtar.bat"
 
 # -- Custom mode (full validation in STEP 0) --
 $CUSTOM_MODE = ($CustomConfig -ne "")
@@ -177,6 +182,98 @@ function Get-MonitorShellProcs() {
         }
     }
     return $found
+}
+
+function Set-InstallLock {
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    Set-Content $INSTALL_LOCK (Get-Date -Format 'o') -Force -EA SilentlyContinue
+    New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' 1 -Type DWord -Force
+}
+
+function Clear-InstallLock {
+    Remove-Item $INSTALL_LOCK -Force -EA SilentlyContinue
+    Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
+}
+
+function Remove-InstallBlocks {
+    foreach ($r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
+        netsh advfirewall firewall delete rule name="$r" 2>$null | Out-Null
+    }
+}
+
+function Ensure-TunnelForInstall {
+    if (Test-TunnelRunning) {
+        OK "Tunnel already RUNNING - kept alive during upgrade"
+        return $true
+    }
+    if (-not (Test-Path $CONFIG)) { WARN "Config missing - cannot install tunnel"; return $false }
+    Write-Info "Tunnel down - installing service..."
+    & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
+    Start-Sleep 2
+    & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
+    $waited = 0
+    while ($waited -lt 45 -and -not (Test-TunnelRunning)) {
+        Start-Sleep 3
+        $waited += 3
+        if ($waited -eq 15 -and -not (Test-TunnelRunning)) {
+            & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
+            Start-Sleep 2
+            & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
+        }
+    }
+    if (Test-TunnelRunning) { OK "Tunnel RUNNING (waited ${waited}s)"; return $true }
+    WARN "Tunnel not up after ${waited}s - install continues with internet open"
+    return $false
+}
+
+function Write-KurtarScript {
+    $kurtarTunnelSvc = $TUNNEL_SVC
+    $kurtarContent = @"
+# WG Kill Switch - KURTAR (emergency restore, works 100% offline)
+#Requires -RunAsAdministrator
+`$TUNNEL_SVC  = '$kurtarTunnelSvc'
+`$TUNNEL_NAME = '$TUNNEL_NAME'
+`$CONFIG      = '$CONFIG'
+`$WG_EXE      = '$WG_EXE'
+`$INSTALL_LOCK = '$INSTALL_LOCK'
+`$LOG         = '$LOG'
+`$ErrorActionPreference = 'Continue'
+Write-Host '=== WG KURTAR (emergency restore) ===' -ForegroundColor Cyan
+foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
+    netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
+}
+netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
+Remove-Item `$INSTALL_LOCK -Force -EA SilentlyContinue
+Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
+if (-not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
+    Write-Host '[-->] Tunnel down - reinstalling...' -ForegroundColor Yellow
+    if ((Test-Path `$WG_EXE) -and (Test-Path `$CONFIG)) {
+        & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
+        Start-Sleep 2
+        & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
+        Start-Sleep 5
+    }
+}
+`$running = (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
+Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR] Emergency restore - tunnel=`$running" -Encoding UTF8 -EA SilentlyContinue
+Write-Host "[OK] Internet restored (tunnel=`$running)" -ForegroundColor Green
+Write-Host "     Re-run install.ps1 when ready to re-apply kill switch." -ForegroundColor Gray
+"@
+    Set-Content $KURTAR_PS1 $kurtarContent -Encoding UTF8 -Force
+    attrib -H -S $KURTAR_PS1 2>$null | Out-Null
+    @"
+@echo off
+title WireGuard Kill Switch - KURTAR
+echo.
+echo  Acil internet kurtarma (offline calisir)
+echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$KURTAR_PS1"
+echo.
+pause
+"@ | Set-Content $KURTAR_BAT -Encoding ASCII -Force
+    attrib -H -S $KURTAR_BAT 2>$null | Out-Null
+    OK "Emergency rescue: $KURTAR_BAT"
 }
 
 function Update-GpoScriptsIni($iniPath, $scriptPath) {
@@ -330,7 +427,7 @@ if ($CUSTOM_MODE) {
     if ($CustomEndpointIP -eq "") {
         Write-Err "Custom mode: set -CustomEndpointIP or Endpoint= in .conf"; pause; exit 1
     }
-    $confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop
+    $confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop -Raw
     if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
         Write-Err "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
     }
@@ -372,7 +469,7 @@ if ($CUSTOM_MODE) {
         Pop-Location
     } else { OK "WARP config already exists" }
 
-    $confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop
+    $confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop -Raw
     if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
         Write-Err "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
     }
@@ -408,6 +505,17 @@ if (-not (Test-Path $NSSM)) {
         }
     } catch { WARN "NSSM download failed - service layer will be skipped" }
 } else { OK "NSSM present" }
+
+# ================================================================
+Write-Step "STEP 2b - PRE-CACHE + INSTALL LOCK (internet required)"
+# ================================================================
+# Resolve server IPs while internet is still available; set install lock so
+# monitor/repair never cut connectivity during the rest of install.ps1.
+$serverIPs = Get-ServerIPs
+$serverPort = Get-ServerPort
+Set-InstallLock
+Write-KurtarScript
+OK "Server IPs cached; install lock ON (use kurtar.bat if internet drops)"
 
 # ================================================================
 Write-Step "STEP 3 - CLEANUP (old installs)"
@@ -462,7 +570,7 @@ $allRules = @(
 foreach ($k in $allRules) { netsh advfirewall firewall delete rule name="$k" | Out-Null }
 
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
-& $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null; Start-Sleep 3
+# Keep tunnel alive during upgrade — reinstall only in STEP 5 if down
 Remove-Item "$INSTALL_DIR\repair.lock"        -Force -EA SilentlyContinue
 Remove-Item "$INSTALL_DIR\onarim.lock"        -Force -EA SilentlyContinue
 Remove-Item "$INSTALL_DIR\onarim.ps1"         -Force -EA SilentlyContinue
@@ -475,28 +583,13 @@ OK "Cleanup done"
 # ================================================================
 Write-Step "STEP 4 - IPv6 BLOCK"
 # ================================================================
-Remove-NetFirewallRule -DisplayName "KS-Block-IPv6-Out" -EA SilentlyContinue
-Remove-NetFirewallRule -DisplayName "KS-Block-IPv6-In"  -EA SilentlyContinue
-
-$ipv6Params = @{
-    DisplayName   = "KS-Block-IPv6-Out"
-    Direction     = "Outbound"
-    Action        = "Block"
-    RemoteAddress = @("fe80::/10","2001::/32","2002::/16","fc00::/7","2000::/3","::1/128","64:ff9b::/96","64:ff9b:1::/48","100::/64")
-    Enabled       = $true
-    ErrorAction   = "SilentlyContinue"
+netsh advfirewall firewall delete rule name="KS-Block-IPv6-Out" 2>$null | Out-Null
+netsh advfirewall firewall delete rule name="KS-Block-IPv6-In"  2>$null | Out-Null
+# netsh IPv6 remoteip lists are unreliable on some builds; registry + binding disable below are primary
+foreach ($pfx in @('fe80::/10','::1/128','fc00::/7')) {
+    netsh advfirewall firewall add rule name="KS-Block-IPv6-Out" dir=out action=block remoteip=$pfx enable=yes 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-IPv6-In"  dir=in  action=block remoteip=$pfx enable=yes 2>$null | Out-Null
 }
-New-NetFirewallRule @ipv6Params | Out-Null
-
-$ipv6ParamsIn = @{
-    DisplayName   = "KS-Block-IPv6-In"
-    Direction     = "Inbound"
-    Action        = "Block"
-    RemoteAddress = @("fe80::/10","2001::/32","2002::/16","fc00::/7","2000::/3","::1/128","64:ff9b::/96","64:ff9b:1::/48","100::/64")
-    Enabled       = $true
-    ErrorAction   = "SilentlyContinue"
-}
-New-NetFirewallRule @ipv6ParamsIn | Out-Null
 
 Get-NetAdapter | Where-Object { $_.Status -ne "Not Present" -and $_.Name -ne $TUNNEL_NAME } |
     ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -EA SilentlyContinue }
@@ -515,19 +608,14 @@ OK "IPv6 blocked"
 # ================================================================
 Write-Step "STEP 5 - WIREGUARD TUNNEL"
 # ================================================================
-& $WG_EXE /installtunnelservice $CONFIG 2>$null
-Start-Sleep 7
-if (Test-TunnelRunning) { OK "Tunnel RUNNING" } else { WARN "Tunnel not up yet - monitor will start it" }
+Ensure-TunnelForInstall | Out-Null
 & sc.exe config $TUNNEL_SVC start= delayed-auto 2>$null | Out-Null
 OK "WireGuard tunnel: delayed-auto-start"
 
 # ================================================================
 Write-Step "STEP 6 - FIREWALL RULES"
 # ================================================================
-# FIX: cache Get-ServerIPs result once to avoid double Cloudflare API call
-# and guarantee monitor.ps1 uses the exact same IP set as the firewall rules
-$serverIPs = Get-ServerIPs
-$serverPort = Get-ServerPort
+# Server IPs pre-cached in STEP 2b (no network call during install body)
 
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
 netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
@@ -549,16 +637,14 @@ Write-Info "Server IPs: $serverIPs"
 netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIPs remoteport=$serverPort enable=yes | Out-Null
 OK "Firewall rules applied"
 
+# Install lock: never leave outbound blocks on during install (agent/remote needs internet)
+Remove-InstallBlocks
 if (Test-SafeToOpen) {
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          | Out-Null
-    OK "Tunnel + internet verified - unblocked"
+    OK "Tunnel + internet verified - blocks deferred until install completes"
 } elseif (Test-TunnelRunning) {
-    WARN "Tunnel up but no internet (zombie) - block rules active"
+    WARN "Tunnel up but internet not ready - blocks deferred (install lock)"
 } else {
-    WARN "Tunnel down - block rules active"
+    WARN "Tunnel down - blocks deferred (install lock); use kurtar.bat if needed"
 }
 
 # ================================================================
@@ -573,7 +659,7 @@ $monitorPort       = $serverPort
 $monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 
 $monitorContent = @"
-# WireGuard Kill Switch - Monitor v10.7 (auto-generated by install.ps1)
+# WireGuard Kill Switch - Monitor v10.8 (auto-generated by install.ps1)
 `$TUNNEL_SVC   = '$monitorTunnelSvc'
 `$TUNNEL_NAME  = '$monitorTunnelName'
 `$CONFIG       = '$monitorConfig'
@@ -640,6 +726,14 @@ function Test-SafeToOpen {
     return (Test-TunnelRunning) -and (Test-Internet)
 }
 
+function Test-InstallInProgress {
+    if (Test-Path 'C:\WireGuard\install.inprogress') { return `$true }
+    try {
+        `$reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
+        return (`$reg.InstallInProgress -eq 1)
+    } catch { return `$false }
+}
+
 function Test-ServerRulePresent {
     try {
         `$out = netsh advfirewall firewall show rule name="KS-WARP-Server-Out" 2>`$null
@@ -686,6 +780,10 @@ function Get-ResolvedServerIP {
 }
 
 function Enable-Block {
+    if (Test-InstallInProgress) {
+        Log "Install in progress - block skipped (internet stays open)"
+        return
+    }
     netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>`$null | Out-Null
     netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>`$null | Out-Null
     netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>`$null | Out-Null
@@ -757,7 +855,17 @@ try {
     exit 1
 }
 
-Log "=== Monitor started (v10.7) ==="
+Log "=== Monitor started (v10.8) ==="
+
+if (Test-InstallInProgress) {
+    Disable-Block
+    Log "Install in progress - waiting for install.ps1 to finish (internet open)"
+    while (Test-InstallInProgress) {
+        Start-Sleep -Seconds 5
+        Ensure-ServerRule
+    }
+    Log "Install lock cleared - resuming normal kill switch"
+}
 
 try {
     `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
@@ -952,6 +1060,14 @@ function Test-Internet {
 
 function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
 
+function Test-InstallInProgress {
+    if (Test-Path 'C:\WireGuard\install.inprogress') { return $true }
+    try {
+        $reg = Get-ItemProperty $REG_KEY -EA SilentlyContinue
+        return ($reg.InstallInProgress -eq 1)
+    } catch { return $false }
+}
+
 function Get-RepairServerIP {
     try {
         $reg = Get-ItemProperty $REG_KEY -EA SilentlyContinue
@@ -961,6 +1077,7 @@ function Get-RepairServerIP {
 }
 
 function Enable-Block {
+    if (Test-InstallInProgress) { return }
     $serverIp = Get-RepairServerIP
     netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
     netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
@@ -982,6 +1099,11 @@ function Disable-Block {
 }
 
 function Sync-KillSwitchState {
+    if (Test-InstallInProgress) {
+        Disable-Block
+        Log "Sync: install in progress - block deferred"
+        return
+    }
     if (Test-SafeToOpen) {
         Disable-Block
         Log "Sync: healthy - internet open"
@@ -1113,7 +1235,7 @@ OK "repair.ps1 written"
 Write-Step "STEP 9 - WMI WRAPPER"
 # ================================================================
 @'
-# WMI Repair Wrapper v10.7 (auto-generated by install.ps1)
+# WMI Repair Wrapper v10.8 (auto-generated by install.ps1)
 $LOG    = 'C:\WireGuard\killswitch.log'
 $REPAIR = 'C:\WireGuard\repair.ps1'
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
@@ -1171,7 +1293,7 @@ OK "wmi-repair.ps1 written"
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
 @'
-# WGKillSwitchSvc wrapper v10.7 (auto-generated by install.ps1)
+# WGKillSwitchSvc wrapper v10.8 (auto-generated by install.ps1)
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
@@ -1228,7 +1350,7 @@ function TriggerRepair([string]$reason) {
     Log $reason
     if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 }
-Log "WGKillSwitchSvc started (v10.7)"
+Log "WGKillSwitchSvc started (v10.8)"
 Start-Sleep -Seconds 20
 TriggerRepair "Initial repair triggered"
 while ($true) {
@@ -1271,10 +1393,9 @@ $regParams = @{
     Force     = $true
 }
 Register-ScheduledTask @regParams | Out-Null
-schtasks /Run /TN "\$($TASK_MONITOR)" 2>$null | Out-Null
-Start-Sleep 2
+# Monitor start deferred to STEP 19 (after install lock cleared)
 $g1 = Get-ScheduledTask -TaskName $TASK_MONITOR -EA SilentlyContinue
-if ($g1) { OK "WG-KillSwitch task registered ($($g1.State)) - 60s boot delay" }
+if ($g1) { OK "WG-KillSwitch task registered ($($g1.State)) - start deferred to STEP 19" }
 else      { Write-Err "WG-KillSwitch task registration FAILED!" }
 
 # ================================================================
@@ -1330,7 +1451,7 @@ $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRul
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users",         "ReadAndExecute", "ContainerInherit,ObjectInherit","None","Allow")))
 Set-Acl -Path $INSTALL_DIR -AclObject $acl
-Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -ne "killswitch.log" } |
+Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -notin @('killswitch.log','kurtar.ps1','kurtar.bat') } |
     ForEach-Object { attrib +S +H $_.FullName }
 OK "ACL set + files hidden"
 
@@ -1342,7 +1463,7 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.7"                              -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.8"                              -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                             -Force
@@ -1430,7 +1551,7 @@ Write-Step "STEP 17 - GPO BOOT SCRIPT"
 New-Item -ItemType Directory -Path $GPO_SCRIPT_DIR -Force -EA SilentlyContinue | Out-Null
 $gpoTunnelSvc = $TUNNEL_SVC
 $gpoContent = @"
-# WG KillSwitch GPO Boot Script v10.7 (auto-generated by install.ps1)
+# WG KillSwitch GPO Boot Script v10.8 (auto-generated by install.ps1)
 `$LOG        = 'C:\WireGuard\killswitch.log'
 `$REPAIR     = 'C:\WireGuard\repair.ps1'
 `$TUNNEL_SVC = '$gpoTunnelSvc'
@@ -1478,7 +1599,7 @@ function Start-HiddenScript([string]`$ScriptPath) {
     `$shell = Get-PreferredShell
     Start-Process -FilePath `$shell -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$ScriptPath) -WindowStyle Hidden
 }
-Log "GPO boot script fired (v10.7)"
+Log "GPO boot script fired (v10.8)"
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 `$waited = 0
 while (`$waited -lt 90 -and -not (Test-SafeToOpen)) {
@@ -1505,7 +1626,23 @@ try { Add-MpPreference -ExclusionPath $INSTALL_DIR -EA Stop; OK "Defender exclus
 catch { WARN "Defender exclusion failed" }
 
 # ================================================================
-Write-Step "STEP 19 - FINAL CHECK"
+Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
+# ================================================================
+Ensure-TunnelForInstall | Out-Null
+Write-KurtarScript
+Clear-InstallLock
+OK "Install lock cleared - kill switch may now block if tunnel fails"
+schtasks /Run /TN "\$($TASK_MONITOR)" 2>$null | Out-Null
+Start-Sleep 5
+if (-not (Test-SafeToOpen)) {
+    Remove-InstallBlocks
+    WARN "Tunnel not healthy yet - blocks OFF; monitor will recover. kurtar.bat available."
+} else {
+    OK "Tunnel + internet OK - monitor taking over"
+}
+
+# ================================================================
+Write-Step "STEP 20 - FINAL CHECK"
 # ================================================================
 $warnings = 0
 if (Test-TunnelRunning) { OK "Tunnel: RUNNING" } else { WARN "Tunnel: DOWN (monitor will recover)"; $warnings++ }
@@ -1575,11 +1712,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v10.7 completed"
+Log "install.ps1 v10.8 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.7)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.8)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow
@@ -1588,6 +1725,7 @@ if ($warnings -eq 0) {
 }
 Write-Host ""
 Write-Host "  Log: C:\WireGuard\killswitch.log" -ForegroundColor Gray
+Write-Host "  Rescue (offline): C:\WireGuard\kurtar.bat" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Protection layers:" -ForegroundColor White
 Write-Host "  [1] WireGuard tunnel: delayed-auto-start"           -ForegroundColor DarkGray
