@@ -1,64 +1,168 @@
-\# Windows WireGuard/WARP Kill Switch (Refactored)
+# Windows WireGuard Kill Switch (WARP Auto-Setup)
 
+> **One script. No config. No personal info. Full kill switch.**
 
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops.
 
-A modular, self-healing kill switch implementation for Windows designed to prevent any protocol, IP, or DNS leakage when using Cloudflare WARP via WireGuard. 
+---
 
+## What it does
 
+1. **Downloads & installs WireGuard** silently (if not already installed)
+2. **Downloads wgcf** and generates an **anonymous** Cloudflare WARP account — no email, no login
+3. **Applies a kill switch** via Windows Firewall that blocks all internet traffic unless the VPN tunnel is active
+4. **Installs 8 redundant recovery layers** so the VPN restarts automatically after crashes or reboots
 
-Most scripts fail during the boot sequence because they attempt to enforce rules before the Windows network stack or wireguard drivers are fully initialized. This refactored setup addresses this by implementing staggered boot delays and a continuous self-healing matrix.
+No personal data is stored anywhere. The WARP registration is completely anonymous.
 
+---
 
+## Requirements
 
-\## Core Features
+- Windows 10 / 11 (x64)
+- PowerShell 5.1+
+- Run as **Administrator**
+- Internet access during setup
 
-\* \*\*Zero-Trust ACL Routing:\*\* Complete physical interface isolation (Wi-Fi/Ethernet) and nuclear IPv6 blocking at the adapter level to prevent dual-stack bypass.
+---
 
-\* \*\*WMI Permanent Subscriptions:\*\* Spawns a low-level WMI event filter. If the core monitoring PowerShell process is manually killed or crashes, the OS immediately triggers a recovery wrapper.
-
-\* \*\*Triple-Layer Persistence:\*\* Orchestrated via NSSM (running as a delayed-start Windows Service), Task Scheduler (SYSTEM level), and GPO local startup scripts.
-
-\* \*\*Active Anti-Stall:\*\* Implements a dynamic token/mutex mechanism to handle automated tunnel reinstalls without process race conditions.
-
-
-
-\## Project Structure
-
-\* `Deploy.ps1` - The main orchestrator that sets up permissions and triggers modules.
-
-\* `src/Install-Prereqs.ps1` - Handles silent binary deployment (WireGuard \& NSSM) and anonymous profile generation.
-
-\* `src/Setup-Firewall.ps1` - Flushes legacy rules and builds the strict firewall matrix.
-
-\* `src/Watchdog-Service.ps1` - Establishes WMI subscriptions, tasks, and system persistence.
-
-## Resilience & Leak Testing
-
-Most VPN kill switches only work under ideal conditions. This implementation was subjected to aggressive, simulated infrastructure failures to guarantee a 100% zero-leak state under all conditions.
-
-## Stress Test Scenarios Passed (Zero Leaks Detected):
-* **Hard Reboots & Power Cycles:** Verified that the network stack is strictly locked *before* Windows finishes loading asynchronously, blocking early-boot driver vulnerabilities.
-* **Router & Modem Resets:** Simulating a sudden WAN drop or PPPoE lease renewal does not cause a race condition. The script actively stalls and re-evaluates the routing matrix without dropping the firewall ACL.
-* **Forced Process Termination:** Manually killing the monitoring core from Task Manager or a high-privilege command prompt instantly triggers the kernel-level WMI Permanent Event Consumer, respawning the watchdog wrapper within milliseconds.
-* **Windows Updates & Background Servicing:** Survives local GPO refreshes, Windows Defender updates, and dynamic network adapter resets triggered by OS background tasks.
-
-## Protocol & Software Compatibility
-Tested and proven to completely prevent IPv4, IPv6, and WebRTC leakage across heavy network loads, specialized scraping scripts, and automated scraping software:
-* **Web Browsers:** Hardened against WebRTC/STUN leaks on hardened Firefox, Chromium, and Brave profiles.
-* **Custom Automation & Tools:** Complete security wrapper for custom headless automation scripts, persistent background programs, and P2P/media streaming utilities that directly query socket layers.
-
-
-
-## Deployment
-
-Since Windows does not provide a default "Run as Administrator" right-click option for `.ps1` files, follow these exact steps to deploy:
-
-1. Open the **Start Menu**, search for **PowerShell**, right-click it, and select **Run as Administrator**.
-2. Run the following command sequence to navigate to your project directory and execute the orchestrator (adjust the path if your folder is located elsewhere):
+## Installation
 
 ```powershell
-cd "$HOME\Desktop\Windows-WireGuard-KillSwitch"
+# 1. Download install.ps1
+# 2. Right-click → "Run with PowerShell" as Administrator
+#    OR open an elevated PowerShell and run:
+
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\Deploy.ps1
+.\install.ps1
 ```
 
+That's it. No manual WireGuard setup. No account creation. Fully automated.
+
+---
+
+## How the kill switch works
+
+| Situation | Behavior |
+|-----------|----------|
+| VPN tunnel **running** | All internet traffic flows normally through WARP |
+| VPN tunnel **drops** | Internet is **immediately blocked** via firewall rules |
+| VPN **recovers** | Internet is automatically unblocked, DNS cache flushed |
+| System **reboots** | Kill switch activates before any traffic can leak |
+
+### Firewall rules applied
+
+- `KS-Block-WiFi-Out` / `KS-Block-Ethernet-Out` — blocks all outbound traffic on real adapters
+- `KS-LAN-*` — allows local network (192.168.x.x, 10.x.x.x, 172.16.x.x)
+- `KS-DHCP-*` — allows DHCP so the adapter can get an IP
+- `KS-DNS-Allow` — allows DNS only to 1.1.1.1 and 1.0.0.1
+- `KS-DNS-Block` — blocks all other DNS (prevents leaks)
+- `KS-WARP-Server-Out` — allows UDP to Cloudflare WARP endpoints (so VPN can reconnect)
+- `KS-Block-IPv6-*` — blocks all IPv6 (prevents leaks)
+
+---
+
+## Recovery layers (8 total)
+
+If anything goes wrong (crash, update, kill), the system recovers automatically:
+
+| Layer | Description |
+|-------|-------------|
+| **monitor.ps1** | Main loop — checks tunnel every 5s, recovers if down |
+| **repair.ps1** | Checks all components, restarts anything missing |
+| **WG-KillSwitch** | Scheduled task, runs at boot (60s delay) + restarts on failure |
+| **WG-RepairTask** | Scheduled task, runs at boot (30s delay) + every 5 minutes |
+| **WGKillSwitchSvc** | Windows service via NSSM, delayed-auto-start |
+| **WMI Subscription** | Watches for powershell.exe death, triggers repair |
+| **Startup shortcut** | `C:\ProgramData\...\StartUp\WGKillSwitch.lnk` |
+| **GPO Boot Script** | Machine startup script via Group Policy |
+
+All layers are installed by `install.ps1`. Nothing needs to be done manually.
+
+---
+
+## Files installed to `C:\WireGuard\`
+
+| File | Purpose |
+|------|---------|
+| `wgcf-profile.conf` | Your anonymous WARP config (auto-generated) |
+| `monitor.ps1` | Main VPN monitor loop |
+| `onarim.ps1` | System repair script |
+| `servis-monitor.ps1` | NSSM service wrapper |
+| `wmi-onarim.ps1` | WMI event consumer wrapper |
+| `killswitch.log` | Live log (max 500 lines, auto-rotated) |
+| `nssm.exe` | Service manager |
+| `wgcf.exe` | WARP config generator |
+| `WG-KillSwitch-backup.xml` | Task backup for self-repair |
+
+All files except the log are hidden/system-flagged and ACL-protected.
+
+---
+
+## Uninstall
+
+Run the following in an elevated PowerShell:
+
+```powershell
+# Stop and remove everything
+schtasks /Delete /TN "\WG-KillSwitch" /F
+schtasks /Delete /TN "\WG-RepairTask" /F
+sc.exe stop WGKillSwitchSvc
+C:\WireGuard\nssm.exe remove WGKillSwitchSvc confirm
+& "C:\Program Files\WireGuard\wireguard.exe" /uninstalltunnelservice wgcf-profile
+Get-NetFirewallRule | Where-Object { $_.DisplayName -like "KS-*" } | Remove-NetFirewallRule
+netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound
+Remove-Item -Recurse -Force "C:\WireGuard"
+Remove-Item -Force "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\WGKillSwitch.lnk"
+Remove-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" "WGKillSwitchGuard"
+Remove-Item "HKLM:\SOFTWARE\WGKillSwitch" -Recurse
+```
+
+---
+
+## Log
+
+```
+C:\WireGuard\killswitch.log
+```
+
+Open in Notepad or PowerShell:
+```powershell
+Get-Content C:\WireGuard\killswitch.log -Wait -Tail 30
+```
+
+---
+
+## Privacy
+
+- No account is created. The `wgcf register` command generates a random device identity on Cloudflare's WARP network.
+- No email, name, or identifying information is collected or stored.
+- The generated `wgcf-profile.conf` contains only a private key and Cloudflare's WARP endpoint — nothing personal.
+
+---
+
+## Troubleshooting
+
+**Tunnel won't start**
+The monitor will retry up to 5 times, then wait 3 minutes and try again indefinitely. Check the log for details.
+
+**Internet blocked after reboot**
+Wait 60–90 seconds. The monitor starts after a boot delay to let the network stack initialize.
+
+**Want to check status right now?**
+```powershell
+# Check tunnel
+sc.exe query "WireGuardTunnel$wgcf-profile"
+
+# Check monitor process
+Get-Process powershell | Where-Object { $_.MainWindowTitle -eq "" }
+
+# View live log
+Get-Content C:\WireGuard\killswitch.log -Tail 20
+```
+
+---
+
+## License
+
+MIT — do whatever you want with it.

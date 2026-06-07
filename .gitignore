@@ -1,0 +1,13 @@
+# Generated at install time - never commit these
+wgcf-profile.conf
+wgcf-account.toml
+*.log
+*.lock
+nssm.exe
+wgcf.exe
+*.msi
+*.zip
+
+# Windows
+Thumbs.db
+Desktop.ini
