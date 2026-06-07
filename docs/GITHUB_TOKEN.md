@@ -1,20 +1,20 @@
 # GitHub API Token — Quick Setup
 
-## 1. Token oluştur
+## 1. Create a token
 
-**Classic token (önerilen, en kolay):**
+**Classic token (recommended):**
 
 https://github.com/settings/tokens/new
 
-| Alan | Değer |
-|------|-------|
+| Field | Value |
+|-------|-------|
 | Note | `wg-killswitch-visibility` |
-| Expiration | 90 days (veya No expiration) |
+| Expiration | 90 days (or No expiration) |
 | Scopes | `repo`, `read:user`, `user:email` |
 
-**Create token** → token'ı kopyala (`ghp_...`). Bir daha gösterilmez.
+Click **Generate token** and copy the value (`ghp_...`). It is shown only once.
 
-**Fine-grained alternatif:**
+**Fine-grained alternative:**
 
 https://github.com/settings/personal-access-tokens/new
 
@@ -23,40 +23,41 @@ https://github.com/settings/personal-access-tokens/new
 
 ---
 
-## 2. Token'ı PowerShell'e ver (tek seferlik)
+## 2. Set the token in PowerShell (one-time)
 
 ```powershell
-$env:GITHUB_TOKEN = "ghp_BURAYA_TOKEN_YAPIŞTIR"
+$env:GITHUB_TOKEN = "ghp_paste_your_token_here"
 ```
 
 ---
 
-## 3. Otomatik script çalıştır
+## 3. Run the automation script
 
 ```powershell
 cd C:\Users\seyit\Windows-WireGuard-KillSwitch
 .\scripts\github-visibility.ps1
 ```
 
-Script şunları yapar:
-- Topics ekler (`wireguard`, `kill-switch`, `powershell`, …)
-- Discussions açar
-- `v10.0` GitHub Release oluşturur
-- Profil bio günceller
+The script will:
+
+- Add repository topics (`wireguard`, `kill-switch`, `powershell`, …)
+- Enable Discussions
+- Create the `v10.0` GitHub Release (if missing)
+- Update your profile bio
 
 ---
 
-## 4. Elle yapılacak tek adım (API yok)
+## 4. One manual step (no API)
 
-Profilde repoyu **pin** et:
+Pin the repo on your profile:
 
 https://github.com/ryderlacin-pixel?tab=repositories
 
-→ **Customize your pins** → `Windows-WireGuard-KillSwitch` seç
+→ **Customize your pins** → select `Windows-WireGuard-KillSwitch`
 
 ---
 
-## Güvenlik
+## Security
 
-- Token'ı chat'e yapıştırma; sadece kendi PowerShell oturumunda kullan
-- İş bitince token'ı revoke edebilirsin: https://github.com/settings/tokens
+- Do not paste the token into chat or commit it to git
+- Revoke when done: https://github.com/settings/tokens

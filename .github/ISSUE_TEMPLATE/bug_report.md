@@ -1,10 +1,12 @@
 ---
 name: Bug report
-about: Report a problem with the kill switch or installer
+about: Report a problem with the kill switch or installer (English only)
 title: "[Bug] "
 labels: bug
 assignees: ''
 ---
+
+**Please write in English.** Non-English issues may be closed without review.
 
 **Version:** (e.g. v10.0 — check `HKLM:\SOFTWARE\WGKillSwitch`)
 

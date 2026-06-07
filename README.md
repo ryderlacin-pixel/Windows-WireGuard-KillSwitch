@@ -12,6 +12,8 @@ Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened ki
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN
 
+> **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
+
 ---
 
 ## Architecture

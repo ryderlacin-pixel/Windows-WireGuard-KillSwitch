@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: English support only
+    url: https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/blob/main/README.md#what-it-does
+    about: Please use English for all issues and discussions. See README for setup and troubleshooting.
