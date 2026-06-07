@@ -2,7 +2,7 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v1.1** adds first-class support for your own WireGuard server.
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.0** is the production-hardened release with custom server support.
 
 ---
 
@@ -41,7 +41,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 That's it. No manual WireGuard setup. No account creation. Fully automated.
 
-### Custom WireGuard server (v1.1)
+### Custom WireGuard server
 
 Use your own `.conf` file instead of WARP. WireGuard is still installed automatically; only wgcf/WARP generation is skipped.
 
@@ -203,11 +203,18 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
+### v10.0
+- **Critical fix:** process detection no longer confuses `servis-monitor.ps1` with `monitor.ps1` (prevents monitor kill loop)
+- Repair script firewall check fixed (no more false "policy corrected" every 5 minutes)
+- Scheduled tasks survive battery mode (`AllowStartIfOnBatteries`, `DontStopIfGoingOnBatteries`)
+- Service monitor uses 60s interval + 2-minute repair cooldown (prevents repair storms)
+- Dual tunnel health check (`Get-Service` + `sc.exe`)
+- WMI + repair only target the main `monitor.ps1` process
+- Migrates legacy `WG-OnarimGorevi` to `WG-RepairTask` on upgrade
+
 ### v1.1
 - Custom WireGuard server support via `-CustomConfig`, `-CustomTunnel`, `-CustomEndpointIP`, `-CustomPort`
 - Endpoint/port auto-parsed from `.conf` when not specified
-- Dynamic tunnel name, server IP, and port baked into monitor/repair/GPO scripts at install time
-- Registry backup extended with custom mode metadata
 
 ### v1.0
 - Initial release: WARP auto-setup + 8-layer kill switch
