@@ -2,7 +2,7 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops.
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v1.1** adds first-class support for your own WireGuard server.
 
 ---
 
@@ -28,6 +28,8 @@ No personal data is stored anywhere. The WARP registration is completely anonymo
 
 ## Installation
 
+### Default — Cloudflare WARP (anonymous)
+
 ```powershell
 # 1. Download install.ps1
 # 2. Right-click → "Run with PowerShell" as Administrator
@@ -39,13 +41,46 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 That's it. No manual WireGuard setup. No account creation. Fully automated.
 
+### Custom WireGuard server (v1.1)
+
+Use your own `.conf` file instead of WARP. WireGuard is still installed automatically; only wgcf/WARP generation is skipped.
+
+**Minimum** — endpoint and port are read from the config file:
+
+```powershell
+.\install.ps1 -CustomConfig "C:\path\to\myvpn.conf"
+```
+
+Tunnel name defaults to the config filename (`myvpn.conf` → tunnel `myvpn`).
+
+**Full control:**
+
+```powershell
+.\install.ps1 `
+  -CustomConfig "C:\path\to\myvpn.conf" `
+  -CustomTunnel "myvpn" `
+  -CustomEndpointIP "1.2.3.4/32" `
+  -CustomPort 51820
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-CustomConfig` | Yes (custom mode) | Path to your WireGuard `.conf` file |
+| `-CustomTunnel` | No | Tunnel/service name (default: config filename) |
+| `-CustomEndpointIP` | No* | Server IP or CIDR for firewall allow rule |
+| `-CustomPort` | No* | WireGuard UDP port (default: `51820`) |
+
+\*If omitted, `Endpoint = IP:PORT` is parsed from the config file.
+
+Custom settings are baked into generated `monitor.ps1`, `onarim.ps1`, and GPO scripts at install time, and stored in `HKLM:\SOFTWARE\WGKillSwitch`.
+
 ---
 
 ## How the kill switch works
 
 | Situation | Behavior |
 |-----------|----------|
-| VPN tunnel **running** | All internet traffic flows normally through WARP |
+| VPN tunnel **running** | All internet traffic flows normally through the tunnel |
 | VPN tunnel **drops** | Internet is **immediately blocked** via firewall rules |
 | VPN **recovers** | Internet is automatically unblocked, DNS cache flushed |
 | System **reboots** | Kill switch activates before any traffic can leak |
@@ -57,7 +92,7 @@ That's it. No manual WireGuard setup. No account creation. Fully automated.
 - `KS-DHCP-*` — allows DHCP so the adapter can get an IP
 - `KS-DNS-Allow` — allows DNS only to 1.1.1.1 and 1.0.0.1
 - `KS-DNS-Block` — blocks all other DNS (prevents leaks)
-- `KS-WARP-Server-Out` — allows UDP to Cloudflare WARP endpoints (so VPN can reconnect)
+- `KS-WARP-Server-Out` — allows UDP to VPN server endpoints (WARP or custom) so the tunnel can reconnect
 - `KS-Block-IPv6-*` — blocks all IPv6 (prevents leaks)
 
 ---
@@ -69,7 +104,7 @@ If anything goes wrong (crash, update, kill), the system recovers automatically:
 | Layer | Description |
 |-------|-------------|
 | **monitor.ps1** | Main loop — checks tunnel every 5s, recovers if down |
-| **repair.ps1** | Checks all components, restarts anything missing |
+| **onarim.ps1** | System repair script — restarts missing components |
 | **WG-KillSwitch** | Scheduled task, runs at boot (60s delay) + restarts on failure |
 | **WG-RepairTask** | Scheduled task, runs at boot (30s delay) + every 5 minutes |
 | **WGKillSwitchSvc** | Windows service via NSSM, delayed-auto-start |
@@ -85,14 +120,14 @@ All layers are installed by `install.ps1`. Nothing needs to be done manually.
 
 | File | Purpose |
 |------|---------|
-| `wgcf-profile.conf` | Your anonymous WARP config (auto-generated) |
+| `wgcf-profile.conf` | WARP config (auto-generated) or your custom config path |
 | `monitor.ps1` | Main VPN monitor loop |
 | `onarim.ps1` | System repair script |
 | `servis-monitor.ps1` | NSSM service wrapper |
 | `wmi-onarim.ps1` | WMI event consumer wrapper |
 | `killswitch.log` | Live log (max 500 lines, auto-rotated) |
 | `nssm.exe` | Service manager |
-| `wgcf.exe` | WARP config generator |
+| `wgcf.exe` | WARP config generator (WARP mode only) |
 | `WG-KillSwitch-backup.xml` | Task backup for self-repair |
 
 All files except the log are hidden/system-flagged and ACL-protected.
@@ -101,7 +136,7 @@ All files except the log are hidden/system-flagged and ACL-protected.
 
 ## Uninstall
 
-Run the following in an elevated PowerShell:
+Run the following in an elevated PowerShell. Replace `wgcf-profile` with your tunnel name if you used custom mode:
 
 ```powershell
 # Stop and remove everything
@@ -126,7 +161,6 @@ Remove-Item "HKLM:\SOFTWARE\WGKillSwitch" -Recurse
 C:\WireGuard\killswitch.log
 ```
 
-Open in Notepad or PowerShell:
 ```powershell
 Get-Content C:\WireGuard\killswitch.log -Wait -Tail 30
 ```
@@ -149,17 +183,34 @@ The monitor will retry up to 5 times, then wait 3 minutes and try again indefini
 **Internet blocked after reboot**
 Wait 60–90 seconds. The monitor starts after a boot delay to let the network stack initialize.
 
-**Want to check status right now?**
-```powershell
-# Check tunnel
-sc.exe query "WireGuardTunnel$wgcf-profile"
+**Custom server won't reconnect when tunnel is down**
+Ensure `-CustomEndpointIP` matches your server's public IP and `-CustomPort` matches the `Endpoint` port in your `.conf`.
 
-# Check monitor process
-Get-Process powershell | Where-Object { $_.MainWindowTitle -eq "" }
+**Want to check status right now?**
+
+```powershell
+# Check tunnel (replace wgcf-profile with your tunnel name if custom)
+sc.exe query "WireGuardTunnel`$wgcf-profile"
+
+# Check registry install info
+Get-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch"
 
 # View live log
 Get-Content C:\WireGuard\killswitch.log -Tail 20
 ```
+
+---
+
+## Changelog
+
+### v1.1
+- Custom WireGuard server support via `-CustomConfig`, `-CustomTunnel`, `-CustomEndpointIP`, `-CustomPort`
+- Endpoint/port auto-parsed from `.conf` when not specified
+- Dynamic tunnel name, server IP, and port baked into monitor/repair/GPO scripts at install time
+- Registry backup extended with custom mode metadata
+
+### v1.0
+- Initial release: WARP auto-setup + 8-layer kill switch
 
 ---
 

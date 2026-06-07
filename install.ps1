@@ -1,12 +1,19 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v1.1)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
 # * Kill Switch (firewall rules + monitor + repair layers) installed
+# * Custom server: -CustomConfig / -CustomEndpointIP / -CustomPort
 # * Run as Administrator
 # ================================================================
 #Requires -RunAsAdministrator
+param(
+    [string]$CustomConfig     = "",  # Own .conf file: .\install.ps1 -CustomConfig "C:\myvpn.conf"
+    [string]$CustomTunnel     = "",  # Tunnel name (default: wgcf-profile)
+    [string]$CustomEndpointIP = "",  # Server IP or CIDR (e.g. "1.2.3.4/32")
+    [int]$CustomPort          = 0    # WireGuard port (default: 2408)
+)
 $ErrorActionPreference = "SilentlyContinue"
 
 # ── Paths ──────────────────────────────────────────────────────
@@ -18,22 +25,28 @@ $ONARIM_PS1  = "C:\WireGuard\onarim.ps1"
 $SERVIS_PS1  = "C:\WireGuard\servis-monitor.ps1"
 $WMI_WRAPPER = "C:\WireGuard\wmi-onarim.ps1"
 $WG_EXE      = "C:\Program Files\WireGuard\wireguard.exe"
-$WGCF_EXE   = "$KLASOR\wgcf.exe"
+$WGCF_EXE    = "$KLASOR\wgcf.exe"
 $NSSM        = "$KLASOR\nssm.exe"
 
 # ── Names ──────────────────────────────────────────────────────
-$TUNEL_ADI   = "wgcf-profile"
-$TUNEL_SVC   = "WireGuardTunnel`$wgcf-profile"
-$GOREV_ANA   = "WG-KillSwitch"
-$GOREV_ONARIM= "WG-RepairTask"
-$WG_SVC_ADI  = "WGKillSwitchSvc"
-$WMI_FILTER  = "WGMonitorFilter"
-$WMI_CONSUMER= "WGMonitorConsumer"
-$STARTUP_LNK = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\WGKillSwitch.lnk"
+$TUNEL_ADI    = "wgcf-profile"
+$TUNEL_SVC    = "WireGuardTunnel`$wgcf-profile"
+$GOREV_ANA    = "WG-KillSwitch"
+$GOREV_ONARIM = "WG-RepairTask"
+$WG_SVC_ADI   = "WGKillSwitchSvc"
+$WMI_FILTER   = "WGMonitorFilter"
+$WMI_CONSUMER = "WGMonitorConsumer"
+$STARTUP_LNK  = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\WGKillSwitch.lnk"
 $GPO_SCRIPT_DIR = "C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup"
-$GPO_SCRIPT  = "$GPO_SCRIPT_DIR\wg-startup.ps1"
-$GPO_INI_DIR = "C:\Windows\System32\GroupPolicy\Machine\Scripts"
-$GPO_INI     = "$GPO_INI_DIR\scripts.ini"
+$GPO_SCRIPT   = "$GPO_SCRIPT_DIR\wg-startup.ps1"
+$GPO_INI_DIR  = "C:\Windows\System32\GroupPolicy\Machine\Scripts"
+$GPO_INI      = "$GPO_INI_DIR\scripts.ini"
+
+# ── Custom mode (full validation in STEP 0) ──
+$CUSTOM_MODE = ($CustomConfig -ne "" -or $CustomEndpointIP -ne "")
+if ($CUSTOM_MODE) {
+    Write-Host " [--] Custom server mode active" -ForegroundColor Cyan
+}
 
 # ── Helpers ────────────────────────────────────────────────────
 function Baslik($t) {
@@ -41,10 +54,10 @@ function Baslik($t) {
     Write-Host " $t" -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Cyan
 }
-function OK($t)   { Write-Host " [OK]   $t" -ForegroundColor Green }
-function WARN($t) { Write-Host " [WARN] $t" -ForegroundColor Yellow }
-function HATA($t) { Write-Host " [ERR]  $t" -ForegroundColor Red }
-function BILGI($t){ Write-Host " [-->]  $t" -ForegroundColor Gray }
+function OK($t)    { Write-Host " [OK]   $t" -ForegroundColor Green }
+function WARN($t)  { Write-Host " [WARN] $t" -ForegroundColor Yellow }
+function HATA($t)  { Write-Host " [ERR]  $t" -ForegroundColor Red }
+function BILGI($t) { Write-Host " [-->]  $t" -ForegroundColor Gray }
 
 function Log($m) {
     $mutex = $null
@@ -64,7 +77,7 @@ function Log($m) {
 function GorevDurdurSil($isim) {
     schtasks /End    /TN "\$isim" /F 2>$null | Out-Null
     schtasks /Delete /TN "\$isim" /F 2>$null | Out-Null
-    Stop-ScheduledTask      -TaskName $isim -EA SilentlyContinue
+    Stop-ScheduledTask       -TaskName $isim -EA SilentlyContinue
     Unregister-ScheduledTask -TaskName $isim -Confirm:$false -EA SilentlyContinue
 }
 
@@ -101,7 +114,33 @@ function ScriptsIniGuncelle($iniDosyasi, $scriptYolu) {
     $icerik | Set-Content $iniDosyasi -Encoding Unicode -Force
 }
 
+function ConfigdenEndpointAl {
+    try {
+        $ep = (Get-Content $CONFIG -Encoding UTF8 -EA Stop) |
+              Where-Object { $_ -match "^\s*Endpoint\s*=" } | Select-Object -First 1
+        if ($ep -match "=\s*([^:\s]+):(\d+)") {
+            return @{ IP = $Matches[1] + "/32"; Port = [int]$Matches[2] }
+        }
+        if ($ep -match "=\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)") {
+            return @{ IP = $Matches[1] + "/32"; Port = 51820 }
+        }
+    } catch {}
+    return $null
+}
+
+function ServerPortAl {
+    if ($CUSTOM_MODE) {
+        if ($CustomPort -gt 0) { return "$CustomPort" }
+        return "51820"
+    }
+    return "2408,854"
+}
+
 function WarpIpleriniAl {
+    if ($CUSTOM_MODE) {
+        BILGI "Custom endpoint: $CustomEndpointIP port $(ServerPortAl)"
+        return $CustomEndpointIP
+    }
     $ipList = [System.Collections.Generic.List[string]]::new()
     try {
         $ep = (Get-Content $CONFIG -Encoding UTF8 -EA Stop) |
@@ -143,7 +182,7 @@ Baslik "STEP 0 - WIREGUARD + WARP AUTOMATIC INSTALL"
 # ================================================================
 New-Item -ItemType Directory -Path $KLASOR -Force | Out-Null
 
-# -- 0.1 WireGuard --
+# -- 0.1 WireGuard (always) --
 if (-not (Test-Path $WG_EXE)) {
     BILGI "WireGuard not found - downloading..."
     $wgMsi = "$KLASOR\wireguard-amd64.msi"
@@ -159,37 +198,67 @@ if (-not (Test-Path $WG_EXE)) {
     } catch { HATA "WireGuard download/install error: $_"; pause; exit 1 }
 } else { OK "WireGuard already present" }
 
-# -- 0.2 wgcf --
-if (-not (Test-Path $WGCF_EXE)) {
-    BILGI "Downloading wgcf..."
-    try {
-        Invoke-WebRequest "https://github.com/ViRb3/wgcf/releases/download/v2.2.19/wgcf_2.2.19_windows_amd64.exe" `
-            -OutFile $WGCF_EXE -TimeoutSec 30 -UseBasicParsing
-        OK "wgcf downloaded"
-    } catch { HATA "wgcf download failed: $_"; pause; exit 1 }
-} else { OK "wgcf already present" }
+if ($CUSTOM_MODE) {
+    if ($CustomConfig -eq "" -or -not (Test-Path $CustomConfig)) {
+        HATA "Custom mode requires -CustomConfig pointing to an existing .conf file"; pause; exit 1
+    }
+    $CONFIG = (Resolve-Path $CustomConfig).Path
+    if ($CustomTunnel -ne "") {
+        $TUNEL_ADI = $CustomTunnel
+    } else {
+        $TUNEL_ADI = [System.IO.Path]::GetFileNameWithoutExtension($CONFIG)
+    }
+    $TUNEL_SVC = "WireGuardTunnel`$$TUNEL_ADI"
+    $parsed = ConfigdenEndpointAl
+    if ($CustomEndpointIP -eq "" -and $parsed) {
+        $CustomEndpointIP = $parsed.IP
+        BILGI "Endpoint from config: $CustomEndpointIP"
+    }
+    if ($CustomPort -eq 0 -and $parsed) {
+        $CustomPort = $parsed.Port
+        BILGI "Port from config: $CustomPort"
+    }
+    if ($CustomEndpointIP -eq "") {
+        HATA "Custom mode: set -CustomEndpointIP or Endpoint= in .conf"; pause; exit 1
+    }
+    $confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop
+    if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
+        HATA "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
+    }
+    OK "Custom config: $CONFIG | tunnel: $TUNEL_ADI | server: ${CustomEndpointIP}:$(ServerPortAl)"
+} else {
+    # -- 0.2 wgcf --
+    if (-not (Test-Path $WGCF_EXE)) {
+        BILGI "Downloading wgcf..."
+        try {
+            Invoke-WebRequest "https://github.com/ViRb3/wgcf/releases/download/v2.2.19/wgcf_2.2.19_windows_amd64.exe" `
+                -OutFile $WGCF_EXE -TimeoutSec 30 -UseBasicParsing
+            OK "wgcf downloaded"
+        } catch { HATA "wgcf download failed: $_"; pause; exit 1 }
+    } else { OK "wgcf already present" }
 
-# -- 0.3 WARP config (anonymous, no personal info) --
-if (-not (Test-Path $CONFIG)) {
-    BILGI "Generating anonymous WARP config..."
-    Push-Location $KLASOR
-    try {
-        $r = & $WGCF_EXE register --accept-tos 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "wgcf register failed: $r" }
-        $g = & $WGCF_EXE generate 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "wgcf generate failed: $g" }
-        if (Test-Path "$KLASOR\wgcf-profile.conf") {
-            Move-Item "$KLASOR\wgcf-profile.conf" $CONFIG -Force
-            OK "WARP config created: $CONFIG"
-        } else { throw "wgcf-profile.conf not found after generate" }
-    } catch { HATA "WARP config failed: $_"; Pop-Location; pause; exit 1 }
-    Pop-Location
-} else { OK "WARP config already exists" }
+    # -- 0.3 WARP config (anonymous, no personal info) --
+    if (-not (Test-Path $CONFIG)) {
+        BILGI "Generating anonymous WARP config..."
+        Push-Location $KLASOR
+        try {
+            $r = & $WGCF_EXE register --accept-tos 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "wgcf register failed: $r" }
+            $g = & $WGCF_EXE generate 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "wgcf generate failed: $g" }
+            if (Test-Path "$KLASOR\wgcf-profile.conf") {
+                Move-Item "$KLASOR\wgcf-profile.conf" $CONFIG -Force
+                OK "WARP config created: $CONFIG"
+            } else { throw "wgcf-profile.conf not found after generate" }
+        } catch { HATA "WARP config failed: $_"; Pop-Location; pause; exit 1 }
+        Pop-Location
+    } else { OK "WARP config already exists" }
 
-$confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop
-if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
-    HATA "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
-}
+    $confCheck = Get-Content $CONFIG -Encoding UTF8 -EA Stop
+    if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
+        HATA "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
+    }
+} # end WARP block
 
 # ================================================================
 Baslik "STEP 1 - FOLDER PREP"
@@ -220,7 +289,6 @@ Baslik "STEP 3 - CLEANUP (old installs)"
 GorevDurdurSil $GOREV_ANA
 GorevDurdurSil $GOREV_ONARIM
 GorevDurdurSil "WireGuard-KillSwitch-Monitor"
-# Old task names (Turkish - kept for backward compat cleanup)
 GorevDurdurSil "WG-OnarimGorevi"
 
 $eskiSvc = & sc.exe query $WG_SVC_ADI 2>$null
@@ -239,7 +307,6 @@ Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer
 Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -EA SilentlyContinue |
     Where-Object { $_.Filter -like "*$WMI_FILTER*" } | Remove-CimInstance -EA SilentlyContinue
 
-# Remove old Turkish-named filters (backward compat)
 foreach ($oldFilter in @("WGMonitorOldu")) {
     Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
         Where-Object { $_.Name -eq $oldFilter } | Remove-CimInstance -EA SilentlyContinue
@@ -252,13 +319,11 @@ Get-CimInstance Win32_Process -EA SilentlyContinue |
                    $_.CommandLine -like "*servis-monitor.ps1*" -or $_.CommandLine -like "*wmi-onarim.ps1*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 
-# All rule names (English + old Turkish)
 $allRules = @(
     "KS-Block-WiFi-Out","KS-Block-Ethernet-Out","KS-Block-IPv6-Out","KS-Block-IPv6-In",
     "KS-LAN-Out","KS-LAN-In","KS-DHCP-Out","KS-DHCP-In",
     "KS-WARP-Server-Out","KS-Loopback-Out","KS-Loopback-In",
     "KS-DNS-Allow","KS-DNS-Block","KS-WireGuard-EXE","KS-WireGuard-Tunnel-SVC",
-    # Old Turkish names
     "KS - ENGEL Wi-Fi Cikis","KS - ENGEL Ethernet Cikis","KS - ENGEL IPv6 Cikis","KS - ENGEL IPv6 Giris",
     "KS - Yerel Ag Cikis","KS - Yerel Ag Giris","KS - DHCP Cikis","KS - DHCP Giris",
     "KS - WARP Sunucu Cikis","KS - Loopback Cikis","KS - Loopback Giris",
@@ -306,7 +371,7 @@ netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Ou
 netsh advfirewall firewall add rule name="KS-Block-WiFi-Out" `
     dir=out action=block interfacetype=wireless remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
 netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out" `
-    dir=out action=block interfacetype=lan    remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    dir=out action=block interfacetype=lan remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
 netsh advfirewall firewall add rule name="KS-LAN-Out" `
     dir=out action=allow remoteip=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12 enable=yes | Out-Null
 netsh advfirewall firewall add rule name="KS-LAN-In" `
@@ -325,9 +390,10 @@ netsh advfirewall firewall add rule name="KS-DNS-Block" `
     dir=out action=block protocol=UDP remoteport=53 enable=yes | Out-Null
 
 $warpIpler = WarpIpleriniAl
-BILGI "WARP IPs: $warpIpler"
+BILGI "Server IPs: $warpIpler"
+$serverPort = ServerPortAl
 netsh advfirewall firewall add rule name="KS-WARP-Server-Out" `
-    dir=out action=allow protocol=UDP remoteip=$warpIpler remoteport=2408,854 enable=yes | Out-Null
+    dir=out action=allow protocol=UDP remoteip=$warpIpler remoteport=$serverPort enable=yes | Out-Null
 OK "Firewall rules applied"
 
 if (TunelCalisiyor) {
@@ -339,60 +405,58 @@ if (TunelCalisiyor) {
 # ================================================================
 Baslik "STEP 7 - MONITOR SCRIPT"
 # ================================================================
-@'
-# WireGuard Kill Switch - Monitor (auto-generated by install.ps1)
-$TUNEL_SVC = 'WireGuardTunnel$wgcf-profile'
-$TUNEL_ADI = 'wgcf-profile'
-$CONFIG    = 'C:\WireGuard\wgcf-profile.conf'
-$LOG       = 'C:\WireGuard\killswitch.log'
-$WG_EXE    = 'C:\Program Files\WireGuard\wireguard.exe'
+$monitorTunelSvc = $TUNEL_SVC
+$monitorTunelAdi = $TUNEL_ADI
+$monitorConfig   = $CONFIG
+$monitorServerIp = WarpIpleriniAl
+$monitorPort     = ServerPortAl
 
-function Log($m) {
-    $mutex = $null
+$monitorContent = @"
+# WireGuard Kill Switch - Monitor (auto-generated by install.ps1)
+`$TUNEL_SVC = '$monitorTunelSvc'
+`$TUNEL_ADI = '$monitorTunelAdi'
+`$CONFIG    = '$monitorConfig'
+`$LOG       = 'C:\WireGuard\killswitch.log'
+`$WG_EXE    = 'C:\Program Files\WireGuard\wireguard.exe'
+`$SERVER_IP = '$monitorServerIp'
+`$SERVER_PORT = '$monitorPort'
+
+function Log(`$m) {
+    `$mutex = `$null
     try {
-        $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $mutex.WaitOne(3000) | Out-Null
-        Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [MON] $m" -Encoding UTF8 -EA SilentlyContinue
+        `$mutex = New-Object System.Threading.Mutex(`$false, "Global\WGKillSwitchLog")
+        `$mutex.WaitOne(3000) | Out-Null
+        Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [MON] `$m" -Encoding UTF8 -EA SilentlyContinue
         try {
-            $s = Get-Content $LOG -Encoding UTF8 -EA Stop
-            if ($s.Count -gt 500) { $s | Select-Object -Last 250 | Set-Content $LOG -Encoding UTF8 -Force }
+            `$s = Get-Content `$LOG -Encoding UTF8 -EA Stop
+            if (`$s.Count -gt 500) { `$s | Select-Object -Last 250 | Set-Content `$LOG -Encoding UTF8 -Force }
         } catch {}
-    } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
+    } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
 
-function TunelCalisiyor { return ((& sc.exe query $TUNEL_SVC 2>$null) -match "RUNNING") }
+function TunelCalisiyor { return ((`& sc.exe query `$TUNEL_SVC 2>`$null) -match "RUNNING") }
 
 function InternetVar {
     try {
-        $tcp = New-Object System.Net.Sockets.TcpClient
-        $iar = $tcp.BeginConnect('1.1.1.1', 443, $null, $null)
-        $ok  = $iar.AsyncWaitHandle.WaitOne(4000, $false)
-        if ($ok) { $tcp.EndConnect($iar); $tcp.Close(); return $true }
-        $tcp.Close(); return $false
-    } catch { return $false }
-}
-
-function WarpIpAl {
-    try {
-        $ep = (Get-Content $CONFIG -Encoding UTF8 -EA Stop) |
-              Where-Object { $_ -match '^\s*Endpoint\s*=' } | Select-Object -First 1
-        if ($ep -match '=\s*([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+:') { return ($Matches[1] + '.0/24') }
-    } catch {}
-    return "162.159.192.0/24,162.159.193.0/24,162.159.195.0/24,104.16.0.0/13"
+        `$tcp = New-Object System.Net.Sockets.TcpClient
+        `$iar = `$tcp.BeginConnect('1.1.1.1', 443, `$null, `$null)
+        `$ok  = `$iar.AsyncWaitHandle.WaitOne(4000, `$false)
+        if (`$ok) { `$tcp.EndConnect(`$iar); `$tcp.Close(); return `$true }
+        `$tcp.Close(); return `$false
+    } catch { return `$false }
 }
 
 function EngelKapat {
-    $warpIp = WarpIpAl
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"     2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out" `
+    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"     2>`$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out" 2>`$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out" ``
         dir=out action=block interfacetype=wireless remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out" `
-        dir=out action=block interfacetype=lan    remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" `
-        dir=out action=allow protocol=UDP remoteip=$warpIp remoteport=2408,854 enable=yes | Out-Null
-    Log "BLOCK active (WARP $warpIp allowed)"
+    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out" ``
+        dir=out action=block interfacetype=lan remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" ``
+        dir=out action=allow protocol=UDP remoteip=`$SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
+    Log "BLOCK active (server `$SERVER_IP allowed)"
 }
 
 function EngelAc {
@@ -402,256 +466,253 @@ function EngelAc {
 }
 
 function WarpKuraliniGaranti {
-    $ip = WarpIpAl
-    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" `
-        dir=out action=allow protocol=UDP remoteip=$ip remoteport=2408,854 enable=yes | Out-Null
-    Log "WARP rule refreshed ($ip)"
+    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" ``
+        dir=out action=allow protocol=UDP remoteip=`$SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
+    Log "Server rule refreshed (`$SERVER_IP)"
 }
 
 function TunelKurmeYDene {
-    $mux = $null
+    `$mux = `$null
     try {
-        $mux = New-Object System.Threading.Mutex($false, 'Global\WGTunnelInstallMutex')
-        if (-not $mux.WaitOne(60000)) {
-            Log "TunnelReinstall: mutex timeout - another process is installing, keeping current state"
+        `$mux = New-Object System.Threading.Mutex(`$false, 'Global\WGTunnelInstallMutex')
+        if (-not `$mux.WaitOne(60000)) {
+            Log "TunnelReinstall: mutex timeout"
             return (TunelCalisiyor)
         }
         Get-Process -Name "wireguard" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
-        $wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='$TUNEL_SVC'" -EA SilentlyContinue).ProcessId
-        if ($wgSvcPid -and $wgSvcPid -gt 0) { Stop-Process -Id $wgSvcPid -Force -EA SilentlyContinue }
+        `$wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='`$TUNEL_SVC'" -EA SilentlyContinue).ProcessId
+        if (`$wgSvcPid -and `$wgSvcPid -gt 0) { Stop-Process -Id `$wgSvcPid -Force -EA SilentlyContinue }
         Start-Sleep -Seconds 1
-        & $WG_EXE /uninstalltunnelservice $TUNEL_ADI 2>$null
+        `& `$WG_EXE /uninstalltunnelservice `$TUNEL_ADI 2>`$null
         Start-Sleep -Seconds 3
-        & $WG_EXE /installtunnelservice $CONFIG 2>$null
+        `& `$WG_EXE /installtunnelservice `$CONFIG 2>`$null
         Start-Sleep -Seconds 10
         return (TunelCalisiyor)
     } finally {
-        if ($mux) { try { $mux.ReleaseMutex() } catch {} }
+        if (`$mux) { try { `$mux.ReleaseMutex() } catch {} }
     }
 }
 
 Log "=== Monitor started ==="
 
-# Boot grace period: wait up to 90s for tunnel on fresh boot
 try {
-    $bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
-    if ((Get-Date) -lt $bootTime.AddSeconds(90)) {
+    `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
+    if ((Get-Date) -lt `$bootTime.AddSeconds(90)) {
         Log "Fresh boot detected - extra 15s wait for network stack"
         Start-Sleep -Seconds 15
     }
 } catch {}
 
-$bootWait = 0
-while ($bootWait -lt 90 -and -not (TunelCalisiyor)) {
-    Start-Sleep -Seconds 3; $bootWait += 3
+`$bootWait = 0
+while (`$bootWait -lt 90 -and -not (TunelCalisiyor)) {
+    Start-Sleep -Seconds 3; `$bootWait += 3
 }
 
 if (TunelCalisiyor) {
-    $durum = 'running'
+    `$durum = 'running'
     Clear-DnsClientCache -EA SilentlyContinue
     EngelAc
-    Log "Startup: tunnel running (waited ${bootWait}s), internet open"
+    Log "Startup: tunnel running (waited `${bootWait}s), internet open"
 } else {
-    $durum = 'stopped'
+    `$durum = 'stopped'
     EngelKapat
-    Log "Startup: tunnel down (waited ${bootWait}s), block active - starting recovery"
+    Log "Startup: tunnel down (waited `${bootWait}s), block active - starting recovery"
 }
 
-$loopCount = 0
-while ($true) {
+`$loopCount = 0
+while (`$true) {
     Start-Sleep -Seconds 5
-    $loopCount++
-
+    `$loopCount++
     if (TunelCalisiyor) {
-        if ($durum -ne 'running') {
+        if (`$durum -ne 'running') {
             Clear-DnsClientCache -EA SilentlyContinue
             EngelAc
-            $durum = 'running'
+            `$durum = 'running'
         }
     } else {
-        if ($durum -ne 'stopped') {
+        if (`$durum -ne 'stopped') {
             Log "WARNING: Tunnel went down - activating block"
             EngelKapat
-            $durum = 'stopped'
+            `$durum = 'stopped'
         }
         WarpKuraliniGaranti
         Log "Starting recovery"
-        $success = $false
-        $totalAttempts = 0
-        while (-not $success) {
-            for ($i = 1; $i -le 5; $i++) {
-                $totalAttempts++
-                Log "Attempt $i/5 (total: $totalAttempts)"
-                $up = TunelKurmeYDene
-                if ($up) {
-                    $waited = 0; $netOK = $false
-                    while ($waited -lt 30) {
-                        if (InternetVar) { $netOK = $true; break }
-                        Start-Sleep -Seconds 5; $waited += 5
+        `$success = `$false
+        `$totalAttempts = 0
+        while (-not `$success) {
+            for (`$i = 1; `$i -le 5; `$i++) {
+                `$totalAttempts++
+                Log "Attempt `$i/5 (total: `$totalAttempts)"
+                `$up = TunelKurmeYDene
+                if (`$up) {
+                    `$waited = 0; `$netOK = `$false
+                    while (`$waited -lt 30) {
+                        if (InternetVar) { `$netOK = `$true; break }
+                        Start-Sleep -Seconds 5; `$waited += 5
                     }
-                    if ($netOK) {
-                        Log "Attempt $i - tunnel + internet OK (waited ${waited}s)"
+                    if (`$netOK) {
+                        Log "Attempt `$i - tunnel + internet OK (waited `${waited}s)"
                         Clear-DnsClientCache -EA SilentlyContinue
-                        EngelAc; $durum = 'running'; $success = $true; break
+                        EngelAc; `$durum = 'running'; `$success = `$true; break
                     } else {
-                        Log "Attempt $i - tunnel up but no internet after 30s, retrying"
+                        Log "Attempt `$i - tunnel up but no internet after 30s, retrying"
                         EngelKapat
-                        & $WG_EXE /uninstalltunnelservice $TUNEL_ADI 2>$null
+                        `& `$WG_EXE /uninstalltunnelservice `$TUNEL_ADI 2>`$null
                         Start-Sleep -Seconds 3
                     }
                 } else {
-                    Log "Attempt $i - tunnel did not start"
+                    Log "Attempt `$i - tunnel did not start"
                     Start-Sleep -Seconds 5
                 }
             }
-            if (-not $success) {
-                Log "CRITICAL: 5 attempts failed (total: $totalAttempts) - waiting 3min then retrying"
+            if (-not `$success) {
+                Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - waiting 3min then retrying"
                 EngelKapat
-                $waited = 0
-                while ($waited -lt 180) {
-                    Start-Sleep -Seconds 15; $waited += 15
+                `$waited = 0
+                while (`$waited -lt 180) {
+                    Start-Sleep -Seconds 15; `$waited += 15
                     if (TunelCalisiyor) {
                         Log "Tunnel came up during 3min wait!"
-                        $success = $true
+                        `$success = `$true
                         Clear-DnsClientCache -EA SilentlyContinue
-                        EngelAc; $durum = 'running'; break
+                        EngelAc; `$durum = 'running'; break
                     }
                 }
-                if ($success) { break }
+                if (`$success) { break }
                 Log "3min wait done - retrying..."
             }
         }
     }
 }
-'@ | Set-Content $MONITOR_PS1 -Encoding UTF8 -Force
-attrib -H -S $MONITOR_PS1 2>$null | Out-Null
+"@
+$monitorContent | Set-Content $MONITOR_PS1 -Encoding UTF8 -Force
 try {
     $raw = [System.IO.File]::ReadAllText($MONITOR_PS1, [System.Text.Encoding]::UTF8)
     $raw = $raw -replace "(?<!\r)\n", "`r`n"
     [System.IO.File]::WriteAllText($MONITOR_PS1, $raw, [System.Text.Encoding]::UTF8)
 } catch {}
-OK "monitor.ps1 written"
+attrib -H -S $MONITOR_PS1 2>$null | Out-Null
+OK "monitor.ps1 written (server: $monitorServerIp)"
 
 # ================================================================
 Baslik "STEP 8 - REPAIR SCRIPT"
 # ================================================================
-@'
+$repairTunelSvc = $TUNEL_SVC
+$repairTunelAdi = $TUNEL_ADI
+$repairConfig   = $CONFIG
+
+$repairContent = @"
 # WG Repair Script (auto-generated by install.ps1)
-$GOREV_ANA = "WG-KillSwitch"
-$MONITOR   = "C:\WireGuard\monitor.ps1"
-$LOG       = "C:\WireGuard\killswitch.log"
-$TUNEL_SVC = 'WireGuardTunnel$wgcf-profile'
-$WG_EXE    = "C:\Program Files\WireGuard\wireguard.exe"
-$CONFIG    = "C:\WireGuard\wgcf-profile.conf"
-$TUNEL_ADI = "wgcf-profile"
-$LOCK      = "C:\WireGuard\onarim.lock"
+`$GOREV_ANA = "WG-KillSwitch"
+`$MONITOR   = "C:\WireGuard\monitor.ps1"
+`$LOG       = "C:\WireGuard\killswitch.log"
+`$TUNEL_SVC = '$repairTunelSvc'
+`$WG_EXE    = "C:\Program Files\WireGuard\wireguard.exe"
+`$CONFIG    = "$repairConfig"
+`$TUNEL_ADI = "$repairTunelAdi"
+`$LOCK      = "C:\WireGuard\onarim.lock"
 
-function Log($m) {
-    $mutex = $null
+function Log(`$m) {
+    `$mutex = `$null
     try {
-        $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $mutex.WaitOne(3000) | Out-Null
-        Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [REPAIR] $m" -Encoding UTF8 -EA SilentlyContinue
+        `$mutex = New-Object System.Threading.Mutex(`$false, "Global\WGKillSwitchLog")
+        `$mutex.WaitOne(3000) | Out-Null
+        Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [REPAIR] `$m" -Encoding UTF8 -EA SilentlyContinue
         try {
-            $s = Get-Content $LOG -Encoding UTF8 -EA Stop
-            if ($s.Count -gt 500) { $s | Select-Object -Last 250 | Set-Content $LOG -Encoding UTF8 -Force }
+            `$s = Get-Content `$LOG -Encoding UTF8 -EA Stop
+            if (`$s.Count -gt 500) { `$s | Select-Object -Last 250 | Set-Content `$LOG -Encoding UTF8 -Force }
         } catch {}
-    } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
+    } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
 
-if (Test-Path $LOCK) {
-    $lp = [int](Get-Content $LOCK -EA SilentlyContinue)
-    if ($lp -and (Get-Process -Id $lp -EA SilentlyContinue)) { exit 0 }
-    Remove-Item $LOCK -Force -EA SilentlyContinue
+if (Test-Path `$LOCK) {
+    `$lp = [int](Get-Content `$LOCK -EA SilentlyContinue)
+    if (`$lp -and (Get-Process -Id `$lp -EA SilentlyContinue)) { exit 0 }
+    Remove-Item `$LOCK -Force -EA SilentlyContinue
 }
-$PID | Set-Content $LOCK -Force -EA SilentlyContinue
+`$PID | Set-Content `$LOCK -Force -EA SilentlyContinue
 
 try {
-    if (Test-Path $LOG) { attrib -H -S $LOG 2>$null | Out-Null }
+    if (Test-Path `$LOG) { attrib -H -S `$LOG 2>`$null | Out-Null }
 
-    # Firewall policy check
-    $policyOK = $true
-    foreach ($profile in @("DomainProfile","PrivateProfile","PublicProfile")) {
-        if ((netsh advfirewall show $profile 2>$null) -match "BlockOutbound") { $policyOK = $false }
+    `$policyOK = `$true
+    foreach (`$profile in @("DomainProfile","PrivateProfile","PublicProfile")) {
+        if ((netsh advfirewall show `$profile 2>`$null) -match "BlockOutbound") { `$policyOK = `$false }
     }
-    if (-not $policyOK) {
+    if (-not `$policyOK) {
         netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
         Log "Firewall policy corrected"
     }
 
-    # Firewall service check
-    if ((& sc.exe query MpsSvc 2>$null) -match "STOPPED") {
-        & sc.exe start MpsSvc 2>$null | Out-Null; Start-Sleep 3
+    if ((`& sc.exe query MpsSvc 2>`$null) -match "STOPPED") {
+        `& sc.exe start MpsSvc 2>`$null | Out-Null; Start-Sleep 3
         netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
         Log "CRITICAL: Firewall service restarted"
     }
 
-    # Scheduled task check
-    $task = Get-ScheduledTask -TaskName $GOREV_ANA -EA SilentlyContinue
-    if (-not $task) {
-        $b64 = (Get-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" -Name "TaskXML" -EA SilentlyContinue).TaskXML
-        if ($b64) {
-            [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) |
-                Register-ScheduledTask -TaskName $GOREV_ANA -Force | Out-Null
-            schtasks /Run /TN "\$GOREV_ANA" 2>$null | Out-Null
+    `$task = Get-ScheduledTask -TaskName `$GOREV_ANA -EA SilentlyContinue
+    if (-not `$task) {
+        `$b64 = (Get-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" -Name "TaskXML" -EA SilentlyContinue).TaskXML
+        if (`$b64) {
+            [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(`$b64)) |
+                Register-ScheduledTask -TaskName `$GOREV_ANA -Force | Out-Null
+            schtasks /Run /TN "\`$GOREV_ANA" 2>`$null | Out-Null
             Log "WG-KillSwitch task restored from registry backup"
         } else { Log "CRITICAL: No registry backup found" }
-    } elseif ($task.State -eq 'Disabled') {
-        Enable-ScheduledTask -TaskName $GOREV_ANA | Out-Null
-        schtasks /Run /TN "\$GOREV_ANA" 2>$null | Out-Null
+    } elseif (`$task.State -eq 'Disabled') {
+        Enable-ScheduledTask -TaskName `$GOREV_ANA | Out-Null
+        schtasks /Run /TN "\`$GOREV_ANA" 2>`$null | Out-Null
         Log "WG-KillSwitch task re-enabled"
     }
 
-    # Tunnel check
-    if ((& sc.exe query $TUNEL_SVC 2>$null) -notmatch "RUNNING") {
+    if ((`& sc.exe query `$TUNEL_SVC 2>`$null) -notmatch "RUNNING") {
         Log "Tunnel not running - reinstalling"
-        if ((Test-Path $WG_EXE) -and (Test-Path $CONFIG)) {
-            & $WG_EXE /uninstalltunnelservice $TUNEL_ADI 2>$null | Out-Null
+        if ((Test-Path `$WG_EXE) -and (Test-Path `$CONFIG)) {
+            `& `$WG_EXE /uninstalltunnelservice `$TUNEL_ADI 2>`$null | Out-Null
             Start-Sleep 2
-            & $WG_EXE /installtunnelservice $CONFIG 2>$null | Out-Null
+            `& `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
             Start-Sleep 8
-            if ((& sc.exe query $TUNEL_SVC 2>$null) -match "RUNNING") { Log "Tunnel reinstalled OK" }
+            if ((`& sc.exe query `$TUNEL_SVC 2>`$null) -match "RUNNING") { Log "Tunnel reinstalled OK" }
             else { Log "CRITICAL: Tunnel could not be reinstalled" }
         }
     }
 
-    # Service check
-    if ((& sc.exe query WGKillSwitchSvc 2>$null) -notmatch "RUNNING") {
+    if ((`& sc.exe query WGKillSwitchSvc 2>`$null) -notmatch "RUNNING") {
         Log "WGKillSwitchSvc not running - starting"
-        & sc.exe start WGKillSwitchSvc 2>$null | Out-Null; Start-Sleep 5
-        if ((& sc.exe query WGKillSwitchSvc 2>$null) -match "RUNNING") { Log "WGKillSwitchSvc started" }
+        `& sc.exe start WGKillSwitchSvc 2>`$null | Out-Null; Start-Sleep 5
+        if ((`& sc.exe query WGKillSwitchSvc 2>`$null) -match "RUNNING") { Log "WGKillSwitchSvc started" }
         else { Log "CRITICAL: WGKillSwitchSvc could not start" }
     }
 
-    # Monitor process check
     Start-Sleep -Milliseconds 500
-    $procs = Get-Process powershell -EA SilentlyContinue | Where-Object {
-        try { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine -like "*monitor.ps1*" }
-        catch { $false }
+    `$procs = Get-Process powershell -EA SilentlyContinue | Where-Object {
+        try { (Get-CimInstance Win32_Process -Filter "ProcessId=`$(`$_.Id)" -EA Stop).CommandLine -like "*monitor.ps1*" }
+        catch { `$false }
     }
-    if (-not $procs) {
+    if (-not `$procs) {
         Log "Monitor process missing - triggering task and direct start"
-        schtasks /Run /TN "\$GOREV_ANA" 2>$null | Out-Null
+        schtasks /Run /TN "\`$GOREV_ANA" 2>`$null | Out-Null
         Start-Sleep 3
-        $procs2 = Get-Process powershell -EA SilentlyContinue | Where-Object {
-            try { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine -like "*monitor.ps1*" }
-            catch { $false }
+        `$procs2 = Get-Process powershell -EA SilentlyContinue | Where-Object {
+            try { (Get-CimInstance Win32_Process -Filter "ProcessId=`$(`$_.Id)" -EA Stop).CommandLine -like "*monitor.ps1*" }
+            catch { `$false }
         }
-        if (-not $procs2) {
-            Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$MONITOR`"" -WindowStyle Hidden
+        if (-not `$procs2) {
+            Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ``"`$MONITOR``"" -WindowStyle Hidden
             Log "Monitor started directly"
         }
-    } elseif (($procs | Measure-Object).Count -gt 1) {
-        $procs | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object {
-            Stop-Process -Id $_.Id -Force -EA SilentlyContinue
-            Log "Duplicate monitor killed (PID: $($_.Id))"
+    } elseif ((`$procs | Measure-Object).Count -gt 1) {
+        `$procs | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object {
+            Stop-Process -Id `$_.Id -Force -EA SilentlyContinue
+            Log "Duplicate monitor killed (PID: `$(`$_.Id))"
         }
     }
 } finally {
-    Remove-Item $LOCK -Force -EA SilentlyContinue
+    Remove-Item `$LOCK -Force -EA SilentlyContinue
 }
-'@ | Set-Content $ONARIM_PS1 -Encoding UTF8 -Force
+"@
+$repairContent | Set-Content $ONARIM_PS1 -Encoding UTF8 -Force
 OK "repair.ps1 written"
 
 # ================================================================
@@ -767,9 +828,9 @@ Baslik "STEP 13 - REGISTRY BACKUP + FOLDER PROTECTION"
 $acl = Get-Acl $KLASOR
 $acl.SetAccessRuleProtection($true, $false)
 $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM",   "FullControl",     "ContainerInherit,ObjectInherit","None","Allow")))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl",     "ContainerInherit,ObjectInherit","None","Allow")))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users",         "ReadAndExecute",  "ContainerInherit,ObjectInherit","None","Allow")))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM",   "FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users",         "ReadAndExecute", "ContainerInherit,ObjectInherit","None","Allow")))
 Set-Acl -Path $KLASOR -AclObject $acl
 Get-ChildItem $KLASOR -File | Where-Object { $_.Name -ne "killswitch.log" } |
     ForEach-Object { attrib +S +H $_.FullName }
@@ -780,11 +841,16 @@ if ($taskXml) {
     $taskXml | Set-Content "$KLASOR\WG-KillSwitch-backup.xml" -Encoding UTF8 -Force
     $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($taskXml))
     New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                              -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                      -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $ONARIM_PS1                       -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "1.0"                             -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                               -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                       -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $ONARIM_PS1                        -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "1.1"                              -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)               -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                            -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TunnelName"    $TUNEL_ADI                         -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerIP"        $CustomEndpointIP                  -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerPort"    (ServerPortAl)                    -Force
     OK "Registry backup written"
 }
 
@@ -812,7 +878,7 @@ if (Test-Path $NSSM) {
     & $NSSM start      $WG_SVC_ADI 2>$null | Out-Null
     Start-Sleep 5
     $svcStatus = & sc.exe query $WG_SVC_ADI 2>$null
-    if ($svcStatus -match "RUNNING") { OK "WGKillSwitchSvc: RUNNING (delayed-auto)" }
+    if ($svcStatus -match "RUNNING")  { OK "WGKillSwitchSvc: RUNNING (delayed-auto)" }
     elseif ($svcStatus -match "PENDING") { OK "WGKillSwitchSvc: STARTING..." }
     else { WARN "WGKillSwitchSvc did not start - other layers still active" }
 } else { WARN "NSSM not available - service layer skipped" }
@@ -820,10 +886,10 @@ if (Test-Path $NSSM) {
 # ================================================================
 Baslik "STEP 15 - WMI SUBSCRIPTION"
 # ================================================================
-$wmiQuery  = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name = 'powershell.exe'"
-$filter    = New-CimInstance -Namespace root\subscription -ClassName __EventFilter `
+$wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name = 'powershell.exe'"
+$filter   = New-CimInstance -Namespace root\subscription -ClassName __EventFilter `
     -Property @{ Name=$WMI_FILTER; EventNamespace="root\cimv2"; QueryLanguage="WQL"; Query=$wmiQuery } -EA SilentlyContinue
-$consumer  = New-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer `
+$consumer = New-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer `
     -Property @{ Name=$WMI_CONSUMER; CommandLineTemplate="powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WMI_WRAPPER`"" } -EA SilentlyContinue
 if ($filter -and $consumer) {
     New-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding `
@@ -837,8 +903,8 @@ Baslik "STEP 16 - STARTUP FOLDER SHORTCUT"
 New-Item -ItemType Directory -Path (Split-Path $STARTUP_LNK) -Force -EA SilentlyContinue | Out-Null
 $wsh = New-Object -ComObject WScript.Shell
 $lnk = $wsh.CreateShortcut($STARTUP_LNK)
-$lnk.TargetPath      = "powershell.exe"
-$lnk.Arguments       = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ONARIM_PS1`""
+$lnk.TargetPath       = "powershell.exe"
+$lnk.Arguments        = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ONARIM_PS1`""
 $lnk.WorkingDirectory = $KLASOR
 $lnk.Save()
 if (Test-Path $STARTUP_LNK) { OK "Startup shortcut created" } else { WARN "Startup shortcut failed" }
@@ -847,30 +913,32 @@ if (Test-Path $STARTUP_LNK) { OK "Startup shortcut created" } else { WARN "Start
 Baslik "STEP 17 - GPO BOOT SCRIPT"
 # ================================================================
 New-Item -ItemType Directory -Path $GPO_SCRIPT_DIR -Force -EA SilentlyContinue | Out-Null
-@'
+$gpoBakimTunel = $TUNEL_SVC
+$gpoContent = @"
 # WG KillSwitch GPO Boot Script (auto-generated by install.ps1)
-$LOG    = 'C:\WireGuard\killswitch.log'
-$REPAIR = 'C:\WireGuard\onarim.ps1'
-function Log($m) {
-    $mutex = $null
+`$LOG    = 'C:\WireGuard\killswitch.log'
+`$REPAIR = 'C:\WireGuard\onarim.ps1'
+function Log(`$m) {
+    `$mutex = `$null
     try {
-        $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $mutex.WaitOne(2000) | Out-Null
-        Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [GPO] $m" -Encoding UTF8 -EA SilentlyContinue
-    } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
+        `$mutex = New-Object System.Threading.Mutex(`$false, "Global\WGKillSwitchLog")
+        `$mutex.WaitOne(2000) | Out-Null
+        Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [GPO] `$m" -Encoding UTF8 -EA SilentlyContinue
+    } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
 Log "GPO boot script fired"
-netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>$null | Out-Null
-$waited = 0
-while ($waited -lt 60) {
-    if ((& sc.exe query "WireGuardTunnel`$wgcf-profile" 2>$null) -match "RUNNING") { break }
-    Start-Sleep -Seconds 3; $waited += 3
+netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
+`$waited = 0
+while (`$waited -lt 60) {
+    if ((`& sc.exe query "$gpoBakimTunel" 2>`$null) -match "RUNNING") { break }
+    Start-Sleep -Seconds 3; `$waited += 3
 }
-if (Test-Path $REPAIR) {
-    Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR`"" -WindowStyle Hidden
-    Log "Repair triggered (waited ${waited}s)"
+if (Test-Path `$REPAIR) {
+    Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ``"`$REPAIR``"" -WindowStyle Hidden
+    Log "Repair triggered (waited `${waited}s)"
 }
-'@ | Set-Content $GPO_SCRIPT -Encoding UTF8 -Force
+"@
+$gpoContent | Set-Content $GPO_SCRIPT -Encoding UTF8 -Force
 ScriptsIniGuncelle $GPO_INI $GPO_SCRIPT
 Start-Process "secedit.exe"  -ArgumentList "/refreshpolicy machine_policy /enforce" -WindowStyle Hidden -Wait -EA SilentlyContinue
 Start-Process "gpupdate.exe" -ArgumentList "/force" -WindowStyle Hidden -EA SilentlyContinue
@@ -890,7 +958,7 @@ if (TunelCalisiyor) { OK "Tunnel: RUNNING" } else { WARN "Tunnel: DOWN (monitor 
 
 $g1 = Get-ScheduledTask -TaskName $GOREV_ANA    -EA SilentlyContinue
 $g2 = Get-ScheduledTask -TaskName $GOREV_ONARIM -EA SilentlyContinue
-if ($g1) { OK "WG-KillSwitch task: $($g1.State)" }         else { HATA "WG-KillSwitch task MISSING"; $warnings++ }
+if ($g1) { OK "WG-KillSwitch task: $($g1.State)" }  else { HATA "WG-KillSwitch task MISSING"; $warnings++ }
 if ($g2) {
     $tc = ($g2.Triggers | Measure-Object).Count
     if ($tc -ge 2) { OK "WG-RepairTask: $($g2.State) ($tc triggers)" }
@@ -914,18 +982,18 @@ if ($proc) { OK "Monitor: active (PID: $(($proc | Select-Object -First 1).Id))" 
 else        { WARN "Monitor: not yet running" }
 
 $svcSt = & sc.exe query $WG_SVC_ADI 2>$null
-if ($svcSt -match "RUNNING")      { OK "WGKillSwitchSvc: RUNNING" }
-elseif (Test-Path $NSSM)           { WARN "WGKillSwitchSvc: not running"; $warnings++ }
-else                               { WARN "WGKillSwitchSvc: NSSM absent, skipped" }
+if ($svcSt -match "RUNNING")   { OK "WGKillSwitchSvc: RUNNING" }
+elseif (Test-Path $NSSM)        { WARN "WGKillSwitchSvc: not running"; $warnings++ }
+else                            { WARN "WGKillSwitchSvc: NSSM absent, skipped" }
 
 if ((& sc.exe qc $TUNEL_SVC 2>$null) -match "DELAYED") { OK "Tunnel service: delayed-auto-start" }
-else { WARN "Tunnel service: not delayed-auto (may affect boot)"; $warnings++ }
+else { WARN "Tunnel service: not delayed-auto"; $warnings++ }
 
 $wmiK = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
     Where-Object { $_.Name -eq $WMI_FILTER }
 if ($wmiK) { OK "WMI Subscription: ACTIVE" } else { WARN "WMI Subscription: missing"; $warnings++ }
-if (Test-Path $STARTUP_LNK) { OK "Startup shortcut: present" }  else { WARN "Startup shortcut: missing";  $warnings++ }
-if (Test-Path $GPO_SCRIPT)  { OK "GPO script: present" }        else { WARN "GPO script: missing";        $warnings++ }
+if (Test-Path $STARTUP_LNK) { OK "Startup shortcut: present" } else { WARN "Startup shortcut: missing"; $warnings++ }
+if (Test-Path $GPO_SCRIPT)  { OK "GPO script: present" }       else { WARN "GPO script: missing";       $warnings++ }
 
 $reg = Get-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" -EA SilentlyContinue
 if ($reg.TaskXML) { OK "Registry backup: v$($reg.Version)" } else { WARN "Registry backup: missing"; $warnings++ }
@@ -942,11 +1010,13 @@ OK "killswitch.log: accessible"
 $defExcl = (Get-MpPreference -EA SilentlyContinue).ExclusionPath
 if ($defExcl -contains $KLASOR) { OK "Defender exclusion: ACTIVE" } else { WARN "Defender exclusion: inactive" }
 
-Log "install.ps1 completed"
+if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
+
+Log "install.ps1 v1.1 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED                    " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v1.1)             " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow
@@ -954,16 +1024,21 @@ if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "  Log file: C:\WireGuard\killswitch.log" -ForegroundColor Gray
+Write-Host "  Log: C:\WireGuard\killswitch.log" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Protection layers active:" -ForegroundColor White
+Write-Host "  Protection layers:" -ForegroundColor White
 Write-Host "  [1] WireGuard tunnel: delayed-auto-start"           -ForegroundColor DarkGray
 Write-Host "  [2] WGKillSwitchSvc (NSSM): delayed-auto-start"    -ForegroundColor DarkGray
-Write-Host "  [3] WG-KillSwitch scheduled task: 60s boot delay"  -ForegroundColor DarkGray
+Write-Host "  [3] WG-KillSwitch task: 60s boot delay"            -ForegroundColor DarkGray
 Write-Host "  [4] WG-RepairTask: 30s boot delay + every 5min"    -ForegroundColor DarkGray
 Write-Host "  [5] WMI Event Subscription: powershell death watch" -ForegroundColor DarkGray
 Write-Host "  [6] Startup folder shortcut"                        -ForegroundColor DarkGray
 Write-Host "  [7] GPO Machine Startup Script"                     -ForegroundColor DarkGray
 Write-Host "  [8] HKLM Run key"                                   -ForegroundColor DarkGray
 Write-Host ""
+if ($CUSTOM_MODE) {
+    Write-Host "  Custom server usage example:" -ForegroundColor White
+    Write-Host "  .\install.ps1 -CustomConfig C:\myvpn.conf -CustomTunnel myvpn -CustomEndpointIP 1.2.3.4/32 -CustomPort 51820" -ForegroundColor DarkGray
+    Write-Host ""
+}
 pause
