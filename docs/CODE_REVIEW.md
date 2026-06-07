@@ -62,7 +62,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | Requires external service (NSSM helps but is another layer) | Complements NSSM + scheduled tasks — defense in depth |
 
 **Scope limits:**
-- WQL filter matches only `powershell.exe` whose command line contains `\monitor.ps1` or `/monitor.ps1`
+- WQL filter matches `powershell.exe` or `pwsh.exe` whose command line contains `\monitor.ps1` or `/monitor.ps1`
 - Does **not** match `service-monitor.ps1`, `repair.ps1`, or `wmi-repair.ps1`
 - Consumer runs `wmi-repair.ps1` (thin wrapper), not arbitrary code
 

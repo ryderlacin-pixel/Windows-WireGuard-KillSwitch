@@ -48,25 +48,10 @@ $headers = @{
 }
 
 function ConvertTo-JsonUtf8([hashtable]$Obj) {
-    $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append('{')
-    $first = $true
-    foreach ($key in $Obj.Keys) {
-        if (-not $first) { [void]$sb.Append(',') }
-        $first = $false
-        $val = $Obj[$key]
-        if ($val -is [bool]) {
-            $encoded = if ($val) { 'true' } else { 'false' }
-        } else {
-            $encoded = '"' + (($val.ToString()) -replace '\\', '\\\\' -replace '"', '\"' -replace "`r", '\r' -replace "`n", '\n' -replace "`t", '\t') + '"'
-        }
-        [void]$sb.Append('"')
-        [void]$sb.Append($key)
-        [void]$sb.Append('":')
-        [void]$sb.Append($encoded)
-    }
-    [void]$sb.Append('}')
-    [System.Text.Encoding]::UTF8.GetBytes($sb.ToString())
+    $ordered = [ordered]@{}
+    foreach ($key in $Obj.Keys) { $ordered[$key] = $Obj[$key] }
+    $json = $ordered | ConvertTo-Json -Compress -Depth 10
+    [System.Text.Encoding]::UTF8.GetBytes($json)
 }
 
 function Invoke-GH($Method, $Uri, $Body) {
