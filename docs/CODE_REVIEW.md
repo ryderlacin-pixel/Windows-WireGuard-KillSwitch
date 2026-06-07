@@ -2,7 +2,7 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v10.5](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.5)
+**Current release:** [v10.6](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.6)
 
 This document answers the questions raised during external review of v10.2–v10.3 and explains what changed in **v10.4**.
 
@@ -37,6 +37,12 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | `wireguard.exe` blocked by catch-all rules | **Fixed** | `KS-WireGuard-EXE` allow rule for `C:\Program Files\WireGuard\wireguard.exe` |
 | Duplicate monitor processes after reboot | **Fixed** | `Global\WGMainMonitorMutex` — second instance exits immediately |
 | `AbandonedMutexException` kills respawned monitor (`catch { exit 0 }`) | **Fixed in v10.5** | `Wait-NamedMutex` treats abandonment as successful acquire (MS docs); duplicate instance still exits on `WaitOne` timeout |
+| Open internet when tunnel RUNNING but no traffic (zombie service) | **Fixed in v10.6** | `Test-SafeToOpen` = tunnel + dual-host `Test-Internet`; main loop recovery for zombie state |
+| 3min wait opens internet on tunnel-only check | **Fixed in v10.6** | Recovery success requires `Test-SafeToOpen` |
+| Tethering/PPP leak via non-LAN interfaces | **Fixed in v10.6** | `KS-Block-RemoteAccess-Out`, `KS-Block-PPP-Out` |
+| Stale WARP server IPs in generated monitor | **Fixed in v10.6** | `Get-ResolvedServerIP` + periodic refresh in `Ensure-ServerRule` |
+| Log corruption when log mutex times out | **Fixed in v10.6** | Skip write if mutex not acquired |
+| `pwsh.exe` monitor invisible to WMI/repair | **Fixed in v10.6** | `Get-MonitorShellProcs` + WMI WQL includes `pwsh.exe` |
 | Task Scheduler `P9999D` repetition duration fails on some builds | **Fixed** | `RepetitionDuration = 3650 days` (10 years) |
 | WMI looks like overkill / security risk | **By design** | See [Why WMI?](#why-wmi) below |
 | 1200-line monolithic script | **Acknowledged** | Single-file installer is intentional — generates runtime scripts to `C:\WireGuard\`; see [Why one file?](#why-one-file) |
@@ -189,5 +195,6 @@ All reports must be in **English**.
 | v10.1 | English filenames; real-world testing notes |
 | v10.4 | All v10.2–v10.3 review items addressed; design doc in `install.ps1` header |
 | v10.5 | AbandonedMutexException-safe mutex waits (monitor respawn after kill) |
+| v10.6 | Zombie-tunnel prevention, tethering/PPP blocks, runtime WARP IP refresh, pwsh support |
 
 See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases) for full notes per version.

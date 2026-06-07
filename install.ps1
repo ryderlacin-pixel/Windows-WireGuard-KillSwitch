@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.5)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.6)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -21,6 +21,9 @@
 # - KS-WireGuard-EXE rule added to explicitly allow wireguard.exe outbound.
 # - IPv6 block covers full address space including ::1, 64:ff9b::/96 (NAT64 range).
 # - Mutex guards treat AbandonedMutexException as success (previous owner killed = we own it now).
+# - Internet opens only when tunnel is RUNNING and Test-Internet passes (zombie-tunnel leak prevention).
+# - Block rules cover wireless, LAN, remoteaccess (tethering), and PPP interfaces.
+# - WARP mode refreshes Cloudflare server IPs at runtime; log writes skip if mutex times out.
 #
 # If you see WMI and think "overkill": It is intentional.
 # Without it, killing the PowerShell process would silently disable the kill switch.
@@ -82,11 +85,31 @@ function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
     catch [System.Threading.AbandonedMutexException] { return $true }
 }
 
+function Test-TcpHost([string]$HostName, [int]$Port, [int]$TimeoutMs = 4000) {
+    $tcp = $null
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $iar = $tcp.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { return $false }
+        try { $tcp.EndConnect($iar) } catch { return $false }
+        return $true
+    } catch { return $false }
+    finally { if ($tcp) { try { $tcp.Close() } catch {} } }
+}
+
+function Test-Internet {
+    return (Test-TcpHost '1.1.1.1' 443) -or (Test-TcpHost '1.0.0.1' 443)
+}
+
+function Test-SafeToOpen {
+    return (Test-TunnelRunning) -and (Test-Internet)
+}
+
 function Log([string]$Message) {
     $mutex = $null
     try {
         $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $null = Wait-NamedMutex $mutex 3000
+        if (-not (Wait-NamedMutex $mutex 3000)) { return }
         Add-Content -Path $LOG -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | $Message" -Encoding UTF8 -EA SilentlyContinue
         try {
             $s = Get-Content $LOG -Encoding UTF8 -EA Stop
@@ -117,14 +140,20 @@ function Test-IsMainMonitor([string]$CommandLine) {
     return ($CommandLine -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
 }
 
-function Get-MainMonitorProcs() {
-    Get-Process powershell -EA SilentlyContinue | Where-Object {
-        try {
-            $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-            Test-IsMainMonitor $cmd
-        } catch { $false }
+function Get-MonitorShellProcs() {
+    $found = [System.Collections.Generic.List[object]]::new()
+    foreach ($shell in @('powershell', 'pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if (Test-IsMainMonitor $cmd) { $found.Add($_) }
+            } catch {}
+        }
     }
+    return $found
 }
+
+function Get-MainMonitorProcs() { return Get-MonitorShellProcs() }
 
 function Update-GpoScriptsIni($iniPath, $scriptPath) {
     New-Item -ItemType Directory -Path (Split-Path $iniPath) -Force -EA SilentlyContinue | Out-Null
@@ -393,7 +422,8 @@ Get-CimInstance Win32_Process -EA SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
 
 $allRules = @(
-    "KS-Block-WiFi-Out","KS-Block-Ethernet-Out","KS-Block-IPv6-Out","KS-Block-IPv6-In",
+    "KS-Block-WiFi-Out","KS-Block-Ethernet-Out","KS-Block-RemoteAccess-Out","KS-Block-PPP-Out",
+    "KS-Block-IPv6-Out","KS-Block-IPv6-In",
     "KS-LAN-Out","KS-LAN-In","KS-DHCP-Out","KS-DHCP-In",
     "KS-WARP-Server-Out","KS-Loopback-Out","KS-Loopback-In",
     "KS-DNS-Allow","KS-DNS-Block","KS-DNS-Block-TCP","KS-WireGuard-EXE","KS-WireGuard-Tunnel-SVC",
@@ -473,8 +503,10 @@ $serverIPs = Get-ServerIPs
 $serverPort = Get-ServerPort
 
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
-netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"     dir=out action=block interfacetype=wireless remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out" dir=out action=block interfacetype=lan     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out"     dir=out action=block interfacetype=lan         remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+netsh advfirewall firewall add rule name="KS-Block-RemoteAccess-Out" dir=out action=block interfacetype=remoteaccess remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+netsh advfirewall firewall add rule name="KS-Block-PPP-Out"          dir=out action=block interfacetype=ppp          remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
 netsh advfirewall firewall add rule name="KS-LAN-Out"   dir=out action=allow remoteip=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12 enable=yes | Out-Null
 netsh advfirewall firewall add rule name="KS-LAN-In"    dir=in  action=allow remoteip=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12 enable=yes | Out-Null
 netsh advfirewall firewall add rule name="KS-DHCP-Out"  dir=out action=allow protocol=UDP localport=68 remoteport=67 enable=yes | Out-Null
@@ -490,11 +522,17 @@ Write-Info "Server IPs: $serverIPs"
 netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIPs remoteport=$serverPort enable=yes | Out-Null
 OK "Firewall rules applied"
 
-if (Test-TunnelRunning) {
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"     | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out" | Out-Null
-    OK "Tunnel active - internet unblocked"
-} else { WARN "Tunnel down - block rules active" }
+if (Test-SafeToOpen) {
+    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          | Out-Null
+    OK "Tunnel + internet verified - unblocked"
+} elseif (Test-TunnelRunning) {
+    WARN "Tunnel up but no internet (zombie) - block rules active"
+} else {
+    WARN "Tunnel down - block rules active"
+}
 
 # ================================================================
 Write-Step "STEP 7 - MONITOR SCRIPT"
@@ -505,27 +543,36 @@ $monitorConfig     = $CONFIG
 # Use already-resolved values from STEP 6 (no second API call)
 $monitorServerIp   = $serverIPs
 $monitorPort       = $serverPort
+$monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 
 $monitorContent = @"
-# WireGuard Kill Switch - Monitor (auto-generated by install.ps1)
-`$TUNNEL_SVC  = '$monitorTunnelSvc'
-`$TUNNEL_NAME = '$monitorTunnelName'
-`$CONFIG      = '$monitorConfig'
-`$LOG         = 'C:\WireGuard\killswitch.log'
-`$WG_EXE      = 'C:\Program Files\WireGuard\wireguard.exe'
-`$SERVER_IP   = '$monitorServerIp'
-`$SERVER_PORT = '$monitorPort'
+# WireGuard Kill Switch - Monitor v10.6 (auto-generated by install.ps1)
+`$TUNNEL_SVC   = '$monitorTunnelSvc'
+`$TUNNEL_NAME  = '$monitorTunnelName'
+`$CONFIG       = '$monitorConfig'
+`$LOG          = 'C:\WireGuard\killswitch.log'
+`$WG_EXE       = 'C:\Program Files\WireGuard\wireguard.exe'
+`$REG_KEY      = 'HKLM:\SOFTWARE\WGKillSwitch'
+`$CUSTOM_MODE  = $monitorCustomMode
+`$script:SERVER_IP = '$monitorServerIp'
+`$SERVER_PORT  = '$monitorPort'
+`$script:LastServerIP = ''
+`$script:ServerIPRefreshTick = 0
 
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
     catch [System.Threading.AbandonedMutexException] { return `$true }
 }
 
-function Log(`$m) {
+function Write-Emergency([string]`$m) {
+    try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [MON] `$m" -Encoding UTF8 -EA SilentlyContinue } catch {}
+}
+
+function Log([string]`$m) {
     `$mutex = `$null
     try {
         `$mutex = New-Object System.Threading.Mutex(`$false, "Global\WGKillSwitchLog")
-        `$null = Wait-NamedMutex `$mutex 3000
+        if (-not (Wait-NamedMutex `$mutex 3000)) { return }
         Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [MON] `$m" -Encoding UTF8 -EA SilentlyContinue
         try {
             `$s = Get-Content `$LOG -Encoding UTF8 -EA Stop
@@ -542,38 +589,92 @@ function Test-TunnelRunning {
     return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match "RUNNING"))
 }
 
-function Test-Internet {
+function Test-TcpHost([string]`$HostName, [int]`$Port, [int]`$TimeoutMs = 4000) {
     `$tcp = `$null
     try {
         `$tcp = New-Object System.Net.Sockets.TcpClient
-        `$iar = `$tcp.BeginConnect('1.1.1.1', 443, `$null, `$null)
-        if (-not `$iar.AsyncWaitHandle.WaitOne(4000, `$false)) { return `$false }
+        `$iar = `$tcp.BeginConnect(`$HostName, `$Port, `$null, `$null)
+        if (-not `$iar.AsyncWaitHandle.WaitOne(`$TimeoutMs, `$false)) { return `$false }
         try { `$tcp.EndConnect(`$iar) } catch { return `$false }
         return `$true
     } catch { return `$false }
     finally { if (`$tcp) { try { `$tcp.Close() } catch {} } }
 }
 
+function Test-Internet {
+    return (Test-TcpHost '1.1.1.1' 443) -or (Test-TcpHost '1.0.0.1' 443)
+}
+
+function Test-SafeToOpen {
+    return (Test-TunnelRunning) -and (Test-Internet)
+}
+
+function Get-ResolvedServerIP {
+    if (`$CUSTOM_MODE) {
+        try {
+            `$reg = Get-ItemProperty `$REG_KEY -EA SilentlyContinue
+            if (`$reg.ServerIP) { return [string]`$reg.ServerIP }
+        } catch {}
+        return `$script:SERVER_IP
+    }
+    `$ipList = [System.Collections.Generic.List[string]]::new()
+    try {
+        `$ep = (Get-Content `$CONFIG -Encoding UTF8 -EA Stop) |
+              Where-Object { `$_ -match '^\s*Endpoint\s*=' } | Select-Object -First 1
+        if (`$ep -match '=\s*([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+:') {
+            `$prefix = `$Matches[1] + '.0/24'
+            if (-not `$ipList.Contains(`$prefix)) { `$ipList.Add(`$prefix) }
+        }
+    } catch {}
+    try {
+        `$resp = Invoke-RestMethod 'https://api.cloudflare.com/client/v4/ips' -TimeoutSec 8 -EA Stop
+        if (`$resp.success -and `$resp.result.ipv4_cidrs) {
+            foreach (`$cidr in `$resp.result.ipv4_cidrs) {
+                if (`$cidr -match '^(162\.159\.|104\.16\.)') {
+                    if (-not `$ipList.Contains(`$cidr)) { `$ipList.Add(`$cidr) }
+                }
+            }
+        }
+    } catch {}
+    if (`$ipList.Count -eq 0) { return `$script:SERVER_IP }
+    return (`$ipList -join ',')
+}
+
 function Enable-Block {
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"     2>`$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out" 2>`$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out" dir=out action=block interfacetype=wireless remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out" dir=out action=block interfacetype=lan remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>`$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>`$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>`$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          2>`$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out"     dir=out action=block interfacetype=lan         remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-RemoteAccess-Out" dir=out action=block interfacetype=remoteaccess remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-PPP-Out"          dir=out action=block interfacetype=ppp          remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
     netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
-    Log "BLOCK active (server `$SERVER_IP allowed)"
+    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$script:SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
+    Log "BLOCK active (server `$(`$script:SERVER_IP) allowed)"
 }
 
 function Disable-Block {
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"     | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out" | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          | Out-Null
     Log "BLOCK removed - internet open"
 }
 
 function Ensure-ServerRule {
+    `$script:ServerIPRefreshTick++
+    if (`$script:ServerIPRefreshTick -ge 60 -or -not `$script:LastServerIP) {
+        `$script:ServerIPRefreshTick = 0
+        `$resolved = Get-ResolvedServerIP
+        if (`$resolved -ne `$script:LastServerIP) {
+            `$script:LastServerIP = `$resolved
+            `$script:SERVER_IP = `$resolved
+            Log "Server IPs refreshed: `$resolved"
+        }
+    }
     netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
-    Log "Server rule refreshed (`$SERVER_IP)"
+    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$script:SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
 }
 
 function Try-ReinstallTunnel {
@@ -602,9 +703,15 @@ function Try-ReinstallTunnel {
 try {
     `$mainMux = New-Object System.Threading.Mutex(`$false, 'Global\WGMainMonitorMutex')
     if (-not (Wait-NamedMutex `$mainMux 0)) { exit 0 }
-} catch { exit 0 }
+} catch [System.UnauthorizedAccessException] {
+    Write-Emergency "FATAL: monitor mutex access denied"
+    exit 1
+} catch {
+    Write-Emergency "FATAL: monitor mutex error: `$_"
+    exit 1
+}
 
-Log "=== Monitor started ==="
+Log "=== Monitor started (v10.6) ==="
 
 try {
     `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
@@ -619,77 +726,96 @@ while (`$bootWait -lt 90 -and -not (Test-TunnelRunning)) {
     Start-Sleep -Seconds 3; `$bootWait += 3
 }
 
-if (Test-TunnelRunning) {
-    `$state = 'running'
+if (Test-SafeToOpen) {
+    `$state = 'open'
     Clear-DnsClientCache -EA SilentlyContinue
     Disable-Block
-    Log "Startup: tunnel running (waited `${bootWait}s), internet open"
+    Log "Startup: healthy (waited `${bootWait}s), internet open"
 } else {
-    `$state = 'stopped'
+    `$state = 'blocked'
     Enable-Block
-    Log "Startup: tunnel down (waited `${bootWait}s), block active - starting recovery"
+    if (Test-TunnelRunning) {
+        Log "Startup: zombie tunnel (waited `${bootWait}s), block active - starting recovery"
+    } else {
+        Log "Startup: tunnel down (waited `${bootWait}s), block active - starting recovery"
+    }
 }
 
+`$startupRecovery = (`$state -eq 'blocked')
+
 while (`$true) {
-    Start-Sleep -Seconds 5
-    if (Test-TunnelRunning) {
-        if (`$state -ne 'running') {
+    if (-not `$startupRecovery) { Start-Sleep -Seconds 5 }
+    `$startupRecovery = `$false
+    Ensure-ServerRule
+
+    if (Test-SafeToOpen) {
+        if (`$state -ne 'open') {
             Clear-DnsClientCache -EA SilentlyContinue
             Disable-Block
-            `$state = 'running'
+            `$state = 'open'
+            Log "Healthy: tunnel + internet OK"
         }
-    } else {
-        if (`$state -ne 'stopped') {
-            Log "WARNING: Tunnel went down - activating block"
-            Enable-Block
-            `$state = 'stopped'
+        continue
+    }
+
+    if (`$state -ne 'blocked') {
+        if (Test-TunnelRunning) {
+            Log "WARNING: Zombie tunnel (running, no internet) - activating block"
+        } else {
+            Log "WARNING: Tunnel down - activating block"
         }
-        Ensure-ServerRule
-        Log "Starting recovery"
-        `$success = `$false
-        `$totalAttempts = 0
-        while (-not `$success) {
-            for (`$i = 1; `$i -le 5; `$i++) {
-                `$totalAttempts++
-                Log "Attempt `$i/5 (total: `$totalAttempts)"
-                `$up = Try-ReinstallTunnel
-                if (`$up) {
-                    `$waited = 0; `$netOK = `$false
-                    while (`$waited -lt 30) {
-                        if (Test-Internet) { `$netOK = `$true; break }
-                        Start-Sleep -Seconds 5; `$waited += 5
-                    }
-                    if (`$netOK) {
-                        Log "Attempt `$i - tunnel + internet OK (waited `${waited}s)"
-                        Clear-DnsClientCache -EA SilentlyContinue
-                        Disable-Block; `$state = 'running'; `$success = `$true; break
-                    } else {
-                        Log "Attempt `$i - tunnel up but no internet after 30s, retrying"
-                        Enable-Block
-                        & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null
-                        Start-Sleep -Seconds 3
-                    }
+        Enable-Block
+        `$state = 'blocked'
+    }
+
+    Log "Starting recovery"
+    `$success = `$false
+    `$totalAttempts = 0
+    while (-not `$success) {
+        for (`$i = 1; `$i -le 5; `$i++) {
+            if (Test-SafeToOpen) {
+                Log "Recovery: healthy before attempt `$i"
+                Clear-DnsClientCache -EA SilentlyContinue
+                Disable-Block; `$state = 'open'; `$success = `$true; break
+            }
+            `$totalAttempts++
+            Log "Attempt `$i/5 (total: `$totalAttempts)"
+            `$up = Try-ReinstallTunnel
+            if (`$up) {
+                `$waited = 0; `$netOK = `$false
+                while (`$waited -lt 30) {
+                    if (Test-SafeToOpen) { `$netOK = `$true; break }
+                    Start-Sleep -Seconds 5; `$waited += 5
+                }
+                if (`$netOK) {
+                    Log "Attempt `$i - tunnel + internet OK (waited `${waited}s)"
+                    Clear-DnsClientCache -EA SilentlyContinue
+                    Disable-Block; `$state = 'open'; `$success = `$true; break
                 } else {
-                    Log "Attempt `$i - tunnel did not start"
-                    Start-Sleep -Seconds 5
+                    Log "Attempt `$i - tunnel up but no internet after 30s, retrying"
+                    Enable-Block; `$state = 'blocked'
+                    & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null
+                    Start-Sleep -Seconds 3
+                }
+            } else {
+                Log "Attempt `$i - tunnel did not start"
+                Start-Sleep -Seconds 5
+            }
+        }
+        if (-not `$success) {
+            Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - waiting 3min then retrying"
+            Enable-Block; `$state = 'blocked'
+            `$waited = 0
+            while (`$waited -lt 180) {
+                Start-Sleep -Seconds 15; `$waited += 15
+                if (Test-SafeToOpen) {
+                    Log "Healthy during 3min wait (tunnel + internet verified)"
+                    Clear-DnsClientCache -EA SilentlyContinue
+                    Disable-Block; `$state = 'open'; `$success = `$true; break
                 }
             }
-            if (-not `$success) {
-                Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - waiting 3min then retrying"
-                Enable-Block
-                `$waited = 0
-                while (`$waited -lt 180) {
-                    Start-Sleep -Seconds 15; `$waited += 15
-                    if (Test-TunnelRunning) {
-                        Log "Tunnel came up during 3min wait!"
-                        `$success = `$true
-                        Clear-DnsClientCache -EA SilentlyContinue
-                        Disable-Block; `$state = 'running'; break
-                    }
-                }
-                if (`$success) { break }
-                Log "3min wait done - retrying..."
-            }
+            if (`$success) { break }
+            Log "3min wait done - retrying..."
         }
     }
 }
@@ -736,7 +862,7 @@ function Log($m) {
     $mutex = $null
     try {
         $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $null = Wait-NamedMutex $mutex 3000
+        if (-not (Wait-NamedMutex $mutex 3000)) { return }
         Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [REPAIR] $m" -Encoding UTF8 -EA SilentlyContinue
         try {
             $s = Get-Content $LOG -Encoding UTF8 -EA Stop
@@ -810,22 +936,26 @@ try {
         if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
         return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
     }
-    function GetMainMonitorProcs() {
-        Get-Process powershell -EA SilentlyContinue | Where-Object {
-            try {
-                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-                IsMainMonitor $c
-            } catch { $false }
+    function GetMonitorShellProcs() {
+        $found = @()
+        foreach ($shell in @('powershell', 'pwsh')) {
+            Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+                try {
+                    $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                    if (IsMainMonitor $c) { $found += $_ }
+                } catch {}
+            }
         }
+        return $found
     }
     Start-Sleep -Milliseconds 500
-    $procs = GetMainMonitorProcs
+    $procs = GetMonitorShellProcs
     if (-not $procs) {
         Log "Main monitor missing - triggering task and direct start"
         $taskRun = '\' + $TASK_MONITOR
         schtasks /Run /TN $taskRun 2>$null | Out-Null
         Start-Sleep 4
-        if (-not (GetMainMonitorProcs)) {
+        if (-not (GetMonitorShellProcs)) {
             Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$MONITOR`"" -WindowStyle Hidden
             Log "Monitor started directly"
         }
@@ -846,7 +976,7 @@ OK "repair.ps1 written"
 Write-Step "STEP 9 - WMI WRAPPER"
 # ================================================================
 @'
-# WMI Repair Wrapper v10.5 (auto-generated by install.ps1)
+# WMI Repair Wrapper v10.6 (auto-generated by install.ps1)
 $LOG    = 'C:\WireGuard\killswitch.log'
 $REPAIR = 'C:\WireGuard\repair.ps1'
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
@@ -857,7 +987,7 @@ function Log($m) {
     $mutex = $null
     try {
         $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $null = Wait-NamedMutex $mutex 2000
+        if (-not (Wait-NamedMutex $mutex 2000)) { return }
         Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WMI] $m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
 }
@@ -865,13 +995,20 @@ function IsMainMonitor([string]$cmd) {
     if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
     return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
 }
-Start-Sleep -Seconds 2
-$proc = Get-Process powershell -EA SilentlyContinue | Where-Object {
-    try {
-        $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-        IsMainMonitor $c
-    } catch { $false }
+function GetMonitorShellProcs() {
+    $found = @()
+    foreach ($shell in @('powershell', 'pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if (IsMainMonitor $c) { $found += $_ }
+            } catch {}
+        }
+    }
+    return $found
 }
+Start-Sleep -Seconds 2
+$proc = GetMonitorShellProcs
 if (-not $proc) {
     Log "Main monitor gone - triggering repair"
     if (Test-Path $REPAIR) {
@@ -887,7 +1024,7 @@ OK "wmi-repair.ps1 written"
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
 @'
-# WGKillSwitchSvc wrapper v10.5 (auto-generated by install.ps1)
+# WGKillSwitchSvc wrapper v10.6 (auto-generated by install.ps1)
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
@@ -899,13 +1036,25 @@ function Log($m) {
     $mutex = $null
     try {
         $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        $null = Wait-NamedMutex $mutex 2000
+        if (-not (Wait-NamedMutex $mutex 2000)) { return }
         Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [SVC] $m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
 }
 function IsMainMonitor([string]$cmd) {
     if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
     return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
+}
+function GetMonitorShellProcs() {
+    $found = @()
+    foreach ($shell in @('powershell', 'pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if (IsMainMonitor $c) { $found += $_ }
+            } catch {}
+        }
+    }
+    return $found
 }
 function RepairCooldownActive {
     if (-not (Test-Path $COOLDOWN)) { return $false }
@@ -922,17 +1071,12 @@ function TriggerRepair([string]$reason) {
         Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR`"" -WindowStyle Hidden
     }
 }
-Log "WGKillSwitchSvc started (v10.5)"
+Log "WGKillSwitchSvc started (v10.6)"
 Start-Sleep -Seconds 20
 TriggerRepair "Initial repair triggered"
 while ($true) {
     Start-Sleep -Seconds 60
-    $proc = Get-Process powershell -EA SilentlyContinue | Where-Object {
-        try {
-            $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-            IsMainMonitor $c
-        } catch { $false }
-    }
+    $proc = GetMonitorShellProcs
     if (-not $proc) { TriggerRepair "Main monitor missing - repair triggered" }
 }
 '@ | Set-Content $SERVICE_PS1 -Encoding UTF8 -Force
@@ -1041,7 +1185,7 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.5"                              -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.6"                              -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                             -Force
@@ -1083,7 +1227,7 @@ if (Test-Path $NSSM) {
 # ================================================================
 Write-Step "STEP 15 - WMI SUBSCRIPTION"
 # ================================================================
-$wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name = 'powershell.exe' AND (TargetInstance.CommandLine LIKE '%\monitor.ps1%' OR TargetInstance.CommandLine LIKE '%/monitor.ps1%')"
+$wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name = 'powershell.exe' OR TargetInstance.Name = 'pwsh.exe') AND (TargetInstance.CommandLine LIKE '%\monitor.ps1%' OR TargetInstance.CommandLine LIKE '%/monitor.ps1%')"
 $filterParams = @{
     Namespace  = "root\subscription"
     ClassName  = "__EventFilter"
@@ -1140,7 +1284,7 @@ function Log(`$m) {
     `$mutex = `$null
     try {
         `$mutex = New-Object System.Threading.Mutex(`$false, "Global\WGKillSwitchLog")
-        `$null = Wait-NamedMutex `$mutex 2000
+        if (-not (Wait-NamedMutex `$mutex 2000)) { return }
         Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [GPO] `$m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
@@ -1228,11 +1372,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v10.5 completed"
+Log "install.ps1 v10.6 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.5)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.6)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow
