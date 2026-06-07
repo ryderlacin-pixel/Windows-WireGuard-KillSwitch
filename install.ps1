@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.8)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.9)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -25,8 +25,9 @@
 # - Block rules cover wireless, LAN, remoteaccess (tethering), and PPP interfaces.
 # - WARP mode refreshes Cloudflare server IPs at runtime; log writes skip if mutex times out.
 # - All layers (monitor/repair/GPO) share SafeToOpen logic; repair syncs firewall state every run.
-# - Install-safe (v10.8): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
+# - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
+# - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
 # - Test-Internet requires 2 of 3 hosts (1.1.1.1, 1.0.0.1, 8.8.8.8); server rule rewrite only on IP change.
 #
 # If you see WMI and think "overkill": It is intentional.
@@ -202,6 +203,16 @@ function Remove-InstallBlocks {
     }
 }
 
+function Restart-TunnelWithConfig {
+    if (-not (Test-Path $CONFIG)) { return $false }
+    & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
+    Start-Sleep 2
+    & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
+    $waited = 0
+    while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 2; $waited += 2 }
+    return (Test-TunnelRunning)
+}
+
 function Ensure-TunnelForInstall {
     if (Test-TunnelRunning) {
         OK "Tunnel already RUNNING - kept alive during upgrade"
@@ -224,6 +235,78 @@ function Ensure-TunnelForInstall {
     }
     if (Test-TunnelRunning) { OK "Tunnel RUNNING (waited ${waited}s)"; return $true }
     WARN "Tunnel not up after ${waited}s - install continues with internet open"
+    return $false
+}
+
+function Unlock-InstallDirForWrite {
+    attrib -H -S "$INSTALL_DIR\*" /S /D 2>$null | Out-Null
+    icacls $INSTALL_DIR /grant "BUILTIN\Administrators:(OI)(CI)F" /grant "NT AUTHORITY\SYSTEM:(OI)(CI)F" /T /C /Q 2>$null | Out-Null
+}
+
+function Remove-IPv6FromConfig {
+    if (-not (Test-Path $CONFIG)) { return }
+    Unlock-InstallDirForWrite
+    try {
+        $out = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in (Get-Content $CONFIG -Encoding UTF8 -EA Stop)) {
+            if ($line -match '^\s*Address\s*=') {
+                $parts = ($line -split '=', 2)[1].Trim() -split '\s*,\s*' | Where-Object { $_ -and $_ -notmatch ':' }
+                if ($parts) { $out.Add("Address = $($parts -join ', ')") }
+            } elseif ($line -match '^\s*DNS\s*=') {
+                $parts = ($line -split '=', 2)[1].Trim() -split '\s*,\s*' | Where-Object { $_ -and $_ -notmatch ':' }
+                if ($parts) { $out.Add("DNS = $($parts -join ', ')") }
+            } elseif ($line -match '^\s*AllowedIPs\s*=') {
+                $parts = ($line -split '=', 2)[1].Trim() -split '\s*,\s*' | Where-Object { $_ -and $_ -notmatch ':' }
+                if ($parts) { $out.Add("AllowedIPs = $($parts -join ', ')") }
+            } else { $out.Add($line) }
+        }
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllLines($CONFIG, $out, $utf8NoBom)
+        OK "IPv6 stripped from config (IPv4-only WARP)"
+    } catch { WARN "IPv6 config strip failed: $_" }
+}
+
+function Disable-AllIPv6Bindings {
+    Get-NetAdapter -EA SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' } |
+        ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -EA SilentlyContinue }
+}
+
+function Stop-AllMonitorProcs {
+    Get-CimInstance Win32_Process -EA SilentlyContinue |
+        Where-Object { (Test-IsMainMonitor $_.CommandLine) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+}
+
+function Install-WmiSubscription {
+    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
+        Where-Object { $_.Name -eq $WMI_FILTER } | Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -EA SilentlyContinue |
+        Where-Object { $_.Name -eq $WMI_CONSUMER } | Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -EA SilentlyContinue |
+        Where-Object { $_.Filter -like "*$WMI_FILTER*" } | Remove-CimInstance -EA SilentlyContinue
+    $queries = @(
+        "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='powershell.exe'",
+        "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND TargetInstance.Name='pwsh.exe'"
+    )
+    foreach ($wmiQuery in $queries) {
+        try {
+            $filter = New-CimInstance -Namespace root\subscription -ClassName __EventFilter -Property @{
+                Name=$WMI_FILTER; EventNamespace='root\cimv2'; QueryLanguage='WQL'; Query=$wmiQuery
+            } -EA Stop
+            $consumer = New-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Property @{
+                Name=$WMI_CONSUMER
+                CommandLineTemplate="powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WMI_WRAPPER`""
+            } -EA Stop
+            if ($filter -and $consumer) {
+                New-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Property @{
+                    Filter=[Ref]$filter; Consumer=[Ref]$consumer
+                } -EA Stop | Out-Null
+                return $true
+            }
+        } catch {
+            Write-Info "WMI attempt failed: $($_.Exception.Message)"
+        }
+    }
     return $false
 }
 
@@ -431,6 +514,7 @@ if ($CUSTOM_MODE) {
     if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
         Write-Err "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
     }
+    Remove-IPv6FromConfig
     OK "Custom config: $CONFIG | tunnel: $TUNNEL_NAME | server: ${CustomEndpointIP}:$(Get-ServerPort)"
 } else {
     # -- 0.2 wgcf --
@@ -473,12 +557,16 @@ if ($CUSTOM_MODE) {
     if ($confCheck -notmatch "PrivateKey" -or $confCheck -notmatch "Endpoint") {
         Write-Err "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
     }
+    Remove-IPv6FromConfig
+    if (Restart-TunnelWithConfig) { OK "Tunnel reloaded with IPv4-only config" }
+    else { WARN "Tunnel reload after IPv6 strip failed - STEP 5 will retry" }
 } # end WARP block
 
 # ================================================================
 Write-Step "STEP 1 - FOLDER PREP"
 # ================================================================
 New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+Unlock-InstallDirForWrite
 OK "Folder ready: $INSTALL_DIR"
 
 # ================================================================
@@ -591,8 +679,7 @@ foreach ($pfx in @('fe80::/10','::1/128','fc00::/7')) {
     netsh advfirewall firewall add rule name="KS-Block-IPv6-In"  dir=in  action=block remoteip=$pfx enable=yes 2>$null | Out-Null
 }
 
-Get-NetAdapter | Where-Object { $_.Status -ne "Not Present" -and $_.Name -ne $TUNNEL_NAME } |
-    ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -EA SilentlyContinue }
+Disable-AllIPv6Bindings
 
 $ipv6RegParams = @{
     Path        = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters"
@@ -659,7 +746,7 @@ $monitorPort       = $serverPort
 $monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 
 $monitorContent = @"
-# WireGuard Kill Switch - Monitor v10.8 (auto-generated by install.ps1)
+# WireGuard Kill Switch - Monitor v10.9 (auto-generated by install.ps1)
 `$TUNNEL_SVC   = '$monitorTunnelSvc'
 `$TUNNEL_NAME  = '$monitorTunnelName'
 `$CONFIG       = '$monitorConfig'
@@ -671,6 +758,7 @@ $monitorContent = @"
 `$SERVER_PORT  = '$monitorPort'
 `$script:LastServerIP = ''
 `$script:ServerIPRefreshTick = 0
+`$PID_FILE = 'C:\WireGuard\monitor.pid'
 
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
@@ -847,6 +935,28 @@ function Try-ReinstallTunnel {
 try {
     `$mainMux = New-Object System.Threading.Mutex(`$false, 'Global\WGMainMonitorMutex')
     if (-not (Wait-NamedMutex `$mainMux 0)) { exit 0 }
+    if (Test-Path `$PID_FILE) {
+        try {
+            `$oldPid = [int](Get-Content `$PID_FILE -EA Stop | Select-Object -First 1)
+            if (`$oldPid -gt 0 -and `$oldPid -ne `$PID) {
+                `$oldProc = Get-Process -Id `$oldPid -EA SilentlyContinue
+                if (`$oldProc) { exit 0 }
+            }
+        } catch {}
+    }
+    Set-Content `$PID_FILE `$PID -Force -EA SilentlyContinue
+    foreach (`$shell in @('powershell', 'pwsh')) {
+        Get-Process `$shell -EA SilentlyContinue | ForEach-Object {
+            if (`$_.Id -eq `$PID) { return }
+            try {
+                `$c = (Get-CimInstance Win32_Process -Filter "ProcessId=`$(`$_.Id)" -EA Stop).CommandLine
+                if (`$c -match '(?:\\|/)monitor\.ps1(?:\s|"|$)') {
+                    Stop-Process -Id `$_.Id -Force -EA SilentlyContinue
+                    Log "Duplicate monitor killed at startup (PID: `$(`$_.Id))"
+                }
+            } catch {}
+        }
+    }
 } catch [System.UnauthorizedAccessException] {
     Write-Emergency "FATAL: monitor mutex access denied"
     exit 1
@@ -855,7 +965,7 @@ try {
     exit 1
 }
 
-Log "=== Monitor started (v10.8) ==="
+Log "=== Monitor started (v10.9) ==="
 
 if (Test-InstallInProgress) {
     Disable-Block
@@ -896,21 +1006,29 @@ if (Test-SafeToOpen) {
 }
 
 `$startupRecovery = (`$state -eq 'blocked')
+`$wasOpen = (`$state -eq 'open')
 
 while (`$true) {
-    if (-not `$startupRecovery) { Start-Sleep -Seconds 5 }
+    if (-not `$startupRecovery) { Start-Sleep -Seconds 2 }
     `$startupRecovery = `$false
     Ensure-ServerRule
+
+    if (`$wasOpen -and -not (Test-TunnelRunning)) {
+        Log "Tunnel lost while open - immediate block"
+        Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
+    }
 
     if (Test-SafeToOpen) {
         if (`$state -ne 'open') {
             Clear-DnsClientCache -EA SilentlyContinue
             Disable-Block
             `$state = 'open'
+            `$wasOpen = `$true
             Log "Healthy: tunnel + internet OK"
-        }
+        } else { `$wasOpen = `$true }
         continue
     }
+    `$wasOpen = `$false
 
     if (`$state -ne 'blocked') {
         if (Test-TunnelRunning) {
@@ -957,19 +1075,20 @@ while (`$true) {
             }
         }
         if (-not `$success) {
-            Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - waiting 3min then retrying"
+            Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - holding block 60s then retrying"
             Enable-Block; `$state = 'blocked'
             `$waited = 0
-            while (`$waited -lt 180) {
-                Start-Sleep -Seconds 15; `$waited += 15
+            while (`$waited -lt 60) {
+                Start-Sleep -Seconds 3; `$waited += 3
+                if (-not (Test-TunnelRunning)) { Enable-Block; `$state = 'blocked' }
                 if (Test-SafeToOpen) {
-                    Log "Healthy during 3min wait (tunnel + internet verified)"
+                    Log "Healthy during 60s hold (tunnel + internet verified)"
                     Clear-DnsClientCache -EA SilentlyContinue
-                    Disable-Block; `$state = 'open'; `$success = `$true; break
+                    Disable-Block; `$state = 'open'; `$wasOpen = `$true; `$success = `$true; break
                 }
             }
             if (`$success) { break }
-            Log "3min wait done - retrying..."
+            Log "60s hold done - retrying..."
         }
     }
 }
@@ -1208,13 +1327,22 @@ try {
     Start-Sleep -Milliseconds 500
     $procs = GetMonitorShellProcs
     if (-not $procs) {
-        Log "Main monitor missing - triggering task and direct start"
+        Log "Main monitor missing - triggering task then direct start if needed"
         $taskRun = '\' + $TASK_MONITOR
         schtasks /Run /TN $taskRun 2>$null | Out-Null
-        Start-Sleep 4
-        if (-not (GetMonitorShellProcs)) {
-            Start-HiddenScript $MONITOR
-            Log "Monitor started directly"
+        Start-Sleep 8
+        $procs = GetMonitorShellProcs
+        if (-not $procs) {
+            $mux = $null
+            try {
+                $mux = New-Object System.Threading.Mutex($false, 'Global\WGMainMonitorMutex')
+                if (Wait-NamedMutex $mux 2000) {
+                    if (-not (GetMonitorShellProcs)) {
+                        Start-HiddenScript $MONITOR
+                        Log "Monitor started directly (mutex acquired)"
+                    }
+                }
+            } finally { if ($mux) { try { $mux.ReleaseMutex() } catch {} } }
         }
     } elseif (($procs | Measure-Object).Count -gt 1) {
         $procs | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object {
@@ -1235,7 +1363,7 @@ OK "repair.ps1 written"
 Write-Step "STEP 9 - WMI WRAPPER"
 # ================================================================
 @'
-# WMI Repair Wrapper v10.8 (auto-generated by install.ps1)
+# WMI Repair Wrapper v10.9 (auto-generated by install.ps1)
 $LOG    = 'C:\WireGuard\killswitch.log'
 $REPAIR = 'C:\WireGuard\repair.ps1'
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
@@ -1293,10 +1421,11 @@ OK "wmi-repair.ps1 written"
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
 @'
-# WGKillSwitchSvc wrapper v10.8 (auto-generated by install.ps1)
+# WGKillSwitchSvc wrapper v10.9 (auto-generated by install.ps1)
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
+'@ + "`r`n" + "`$TUNNEL_SVC = '$TUNNEL_SVC'`r`n" + @'
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
     try { return $Mutex.WaitOne($TimeoutMs) }
     catch [System.Threading.AbandonedMutexException] { return $true }
@@ -1350,13 +1479,15 @@ function TriggerRepair([string]$reason) {
     Log $reason
     if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 }
-Log "WGKillSwitchSvc started (v10.8)"
-Start-Sleep -Seconds 20
+Log "WGKillSwitchSvc started (v10.9)"
+Start-Sleep -Seconds 15
 TriggerRepair "Initial repair triggered"
 while ($true) {
-    Start-Sleep -Seconds 60
+    Start-Sleep -Seconds 30
     $proc = GetMonitorShellProcs
-    if (-not $proc) { TriggerRepair "Main monitor missing - repair triggered" }
+    $tunnelDown = (( & sc.exe query $TUNNEL_SVC 2>$null) -notmatch 'RUNNING')
+    if ($tunnelDown) { TriggerRepair "Tunnel down - urgent repair (30s poll)" }
+    elseif (-not $proc) { TriggerRepair "Main monitor missing - repair triggered" }
 }
 '@ | Set-Content $SERVICE_PS1 -Encoding UTF8 -Force
 OK "service-monitor.ps1 written"
@@ -1463,7 +1594,7 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.8"                              -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.9"                              -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                             -Force
@@ -1505,33 +1636,8 @@ if (Test-Path $NSSM) {
 # ================================================================
 Write-Step "STEP 15 - WMI SUBSCRIPTION"
 # ================================================================
-$wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name = 'powershell.exe' OR TargetInstance.Name = 'pwsh.exe') AND (TargetInstance.CommandLine LIKE '%\monitor.ps1%' OR TargetInstance.CommandLine LIKE '%/monitor.ps1%')"
-$filterParams = @{
-    Namespace  = "root\subscription"
-    ClassName  = "__EventFilter"
-    Property   = @{ Name=$WMI_FILTER; EventNamespace="root\cimv2"; QueryLanguage="WQL"; Query=$wmiQuery }
-    ErrorAction= "SilentlyContinue"
-}
-$filter = New-CimInstance @filterParams
-
-$consumerParams = @{
-    Namespace  = "root\subscription"
-    ClassName  = "CommandLineEventConsumer"
-    Property   = @{ Name=$WMI_CONSUMER; CommandLineTemplate="powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WMI_WRAPPER`"" }
-    ErrorAction= "SilentlyContinue"
-}
-$consumer = New-CimInstance @consumerParams
-
-if ($filter -and $consumer) {
-    $bindingParams = @{
-        Namespace  = "root\subscription"
-        ClassName  = "__FilterToConsumerBinding"
-        Property   = @{ Filter=[Ref]$filter; Consumer=[Ref]$consumer }
-        ErrorAction= "SilentlyContinue"
-    }
-    New-CimInstance @bindingParams | Out-Null
-    OK "WMI Event Subscription active"
-} else { WARN "WMI Subscription failed" }
+if (Install-WmiSubscription) { OK "WMI Event Subscription active" }
+else { WARN "WMI Subscription failed - 7 other layers still active" }
 
 # ================================================================
 Write-Step "STEP 16 - STARTUP FOLDER SHORTCUT"
@@ -1551,7 +1657,7 @@ Write-Step "STEP 17 - GPO BOOT SCRIPT"
 New-Item -ItemType Directory -Path $GPO_SCRIPT_DIR -Force -EA SilentlyContinue | Out-Null
 $gpoTunnelSvc = $TUNNEL_SVC
 $gpoContent = @"
-# WG KillSwitch GPO Boot Script v10.8 (auto-generated by install.ps1)
+# WG KillSwitch GPO Boot Script v10.9 (auto-generated by install.ps1)
 `$LOG        = 'C:\WireGuard\killswitch.log'
 `$REPAIR     = 'C:\WireGuard\repair.ps1'
 `$TUNNEL_SVC = '$gpoTunnelSvc'
@@ -1599,7 +1705,7 @@ function Start-HiddenScript([string]`$ScriptPath) {
     `$shell = Get-PreferredShell
     Start-Process -FilePath `$shell -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$ScriptPath) -WindowStyle Hidden
 }
-Log "GPO boot script fired (v10.8)"
+Log "GPO boot script fired (v10.9)"
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 `$waited = 0
 while (`$waited -lt 90 -and -not (Test-SafeToOpen)) {
@@ -1629,10 +1735,19 @@ catch { WARN "Defender exclusion failed" }
 Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
 # ================================================================
 Ensure-TunnelForInstall | Out-Null
+Disable-AllIPv6Bindings
 Write-KurtarScript
 Clear-InstallLock
 OK "Install lock cleared - kill switch may now block if tunnel fails"
+Stop-AllMonitorProcs
+Remove-Item "$INSTALL_DIR\monitor.pid" -Force -EA SilentlyContinue
+Start-Sleep 3
 schtasks /Run /TN "\$($TASK_MONITOR)" 2>$null | Out-Null
+Start-Sleep 8
+Stop-AllMonitorProcs
+Start-Sleep 1
+Start-HiddenScript $MONITOR_PS1
+Start-Sleep 3
 Start-Sleep 5
 if (-not (Test-SafeToOpen)) {
     Remove-InstallBlocks
@@ -1712,11 +1827,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v10.8 completed"
+Log "install.ps1 v10.9 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.8)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.9)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow

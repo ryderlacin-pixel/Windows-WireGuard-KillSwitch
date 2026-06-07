@@ -7,10 +7,10 @@ function Assert([bool]$cond, [string]$msg) {
     else { Write-Host "  [OK] $msg" -ForegroundColor Green }
 }
 
-Write-Host '=== POST-INSTALL VERIFICATION (v10.8) ===' -ForegroundColor Cyan
+Write-Host '=== POST-INSTALL VERIFICATION (v10.9) ===' -ForegroundColor Cyan
 
 $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
-Assert ($reg.Version -eq '10.8') "Registry version 10.8 (got $($reg.Version))"
+Assert ($reg.Version -eq '10.9') "Registry version 10.9 (got $($reg.Version))"
 
 foreach ($f in @('monitor.ps1','repair.ps1','service-monitor.ps1','wmi-repair.ps1','wgcf-profile.conf')) {
     Assert (Test-Path "C:\WireGuard\$f") "File exists: $f"
@@ -93,14 +93,13 @@ $svc = & sc.exe query WGKillSwitchSvc 2>&1 | Out-String
 Assert ($svc -match 'RUNNING') 'WGKillSwitchSvc RUNNING'
 
 $wmi = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue | Where-Object { $_.Name -eq 'WGMonitorFilter' }
-if ($wmi) { Assert $true 'WMI subscription active' }
-else { Write-Host '  [WARN] WMI subscription missing (7 other layers active)' -ForegroundColor Yellow }
+Assert ($null -ne $wmi) 'WMI subscription active'
 
 # Monitor script version check
 $monRaw = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
-Assert ($monRaw -match 'v10\.8') 'monitor.ps1 is v10.8'
+Assert ($monRaw -match 'v10\.9') 'monitor.ps1 is v10.9'
 Assert ($monRaw -match 'Test-SafeToOpen') 'monitor.ps1 has Test-SafeToOpen'
-Assert ($monRaw -match 'Test-InstallInProgress|Test-ServerRulePresent') 'monitor has v10.8 install-safe logic'
+Assert ($monRaw -match 'Test-InstallInProgress|monitor\.pid') 'monitor has v10.9 install-safe logic'
 Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat rescue script present'
 Assert (-not (Test-Path 'C:\WireGuard\install.inprogress')) 'install lock cleared after install'
 
