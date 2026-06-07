@@ -1,4 +1,4 @@
-# Comprehensive offline test suite — target quality 9.5/10 (v10.9)
+# Comprehensive offline test suite — target quality 9.5/10 (v11.0)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $installPath = Join-Path $repoRoot 'install.ps1'
@@ -45,7 +45,7 @@ function Test-ScriptblockCreate([string]$path, [string]$label) {
 }
 
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Kill Switch FULL TEST SUITE (v10.9)' -ForegroundColor Cyan
+Write-Host '  Kill Switch FULL TEST SUITE (v11.0)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 # [1] install.ps1 compile + AST
@@ -56,8 +56,8 @@ Test-ParseFile $installPath 'install.ps1' | Out-Null
 $raw = [string](Get-Content -LiteralPath $installPath -Raw -Encoding UTF8)
 
 # [2] Version / critical patterns
-Write-Host "[2/10] v10.9 patterns" -ForegroundColor Yellow
-foreach ($n in @('v10.9','10.9','Sync-KillSwitchState','Test-ServerRulePresent','Set-ServerRule','Start-HiddenScript','8.8.8.8','hits -ge 2','GPO: zombie tunnel','Test-InstallInProgress','Write-KurtarScript','install.inprogress','kurtar.bat','Remove-IPv6FromConfig','Install-WmiSubscription','Tunnel lost while open','60s hold')) {
+Write-Host "[2/10] v11.0 patterns" -ForegroundColor Yellow
+foreach ($n in @('v11.0','11.0','Ensure-DelayedAutoStart','Test-DelayedAutoStart','Repair-ConfigIntegrity','Repair-EssentialFirewall','Test-NetworkChanged','NetworkFingerprint','Test-BlockRulePresent','wmi-cooldown','WmiCooldownActive','Sync-KillSwitchState','Test-ServerRulePresent','Set-ServerRule','Start-HiddenScript','8.8.8.8','hits -ge 2','GPO: zombie tunnel','Test-InstallInProgress','Write-KurtarScript','install.inprogress','kurtar.bat','Remove-IPv6FromConfig','Install-WmiSubscription','Tunnel lost while open','60s hold','Test-DelayedAutoStart')) {
     Assert-True ($raw -match [regex]::Escape($n)) "Missing: $n"
 }
 Assert-True ($raw -notmatch 'Get-MainMonitorProcs') 'Broken Get-MainMonitorProcs alias must be removed'

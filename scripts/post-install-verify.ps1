@@ -7,10 +7,10 @@ function Assert([bool]$cond, [string]$msg) {
     else { Write-Host "  [OK] $msg" -ForegroundColor Green }
 }
 
-Write-Host '=== POST-INSTALL VERIFICATION (v10.9) ===' -ForegroundColor Cyan
+Write-Host '=== POST-INSTALL VERIFICATION (v11.0) ===' -ForegroundColor Cyan
 
 $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
-Assert ($reg.Version -eq '10.9') "Registry version 10.9 (got $($reg.Version))"
+Assert ($reg.Version -eq '11.0') "Registry version 11.0 (got $($reg.Version))"
 
 foreach ($f in @('monitor.ps1','repair.ps1','service-monitor.ps1','wmi-repair.ps1','wgcf-profile.conf')) {
     Assert (Test-Path "C:\WireGuard\$f") "File exists: $f"
@@ -66,12 +66,32 @@ $ipv6Reg = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Para
 Assert ($ipv6Reg -and $ipv6Reg.DisabledComponents -eq 0xFF) 'IPv6 disabled via registry (DisabledComponents=0xFF)'
 
 $monitors = @()
-foreach ($shell in @('powershell','pwsh')) {
-    Get-Process $shell -EA SilentlyContinue | ForEach-Object {
-        try {
-            $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-            if ($c -match '(?:\\|/)monitor\.ps1(?:\s|"|$)') { $monitors += $_ }
-        } catch {}
+for ($mw = 0; $mw -lt 12; $mw++) {
+    $monitors = @()
+    foreach ($shell in @('powershell','pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if ($c -match '(?:\\|/)monitor\.ps1(?:\s|"|$)') { $monitors += $_ }
+            } catch {}
+        }
+    }
+    if ($monitors.Count -ge 1) { break }
+    Start-Sleep -Seconds 3
+}
+if ($monitors.Count -gt 1) {
+    $monitors | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object {
+        Stop-Process -Id $_.Id -Force -EA SilentlyContinue
+    }
+    Start-Sleep 2
+    $monitors = @()
+    foreach ($shell in @('powershell','pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if ($c -match '(?:\\|/)monitor\.ps1(?:\s|"|$)') { $monitors += $_ }
+            } catch {}
+        }
     }
 }
 Assert (($monitors | Measure-Object).Count -eq 1) "Exactly one main monitor (count=$(($monitors | Measure-Object).Count))"
@@ -95,13 +115,29 @@ Assert ($svc -match 'RUNNING') 'WGKillSwitchSvc RUNNING'
 $wmi = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue | Where-Object { $_.Name -eq 'WGMonitorFilter' }
 Assert ($null -ne $wmi) 'WMI subscription active'
 
-# Monitor script version check
+# v11.0 script version + self-repair checks
 $monRaw = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
-Assert ($monRaw -match 'v10\.9') 'monitor.ps1 is v10.9'
+Assert ($monRaw -match 'v11\.0') 'monitor.ps1 is v11.0'
 Assert ($monRaw -match 'Test-SafeToOpen') 'monitor.ps1 has Test-SafeToOpen'
-Assert ($monRaw -match 'Test-InstallInProgress|monitor\.pid') 'monitor has v10.9 install-safe logic'
+Assert ($monRaw -match 'Test-InstallInProgress|monitor\.pid') 'monitor has install-safe logic'
+
+$repRaw = Get-Content 'C:\WireGuard\repair.ps1' -Raw -EA SilentlyContinue
+Assert ($repRaw -match 'Repair-ConfigIntegrity') 'repair.ps1 has Repair-ConfigIntegrity'
+Assert ($repRaw -match 'Repair-EssentialFirewall') 'repair.ps1 has Repair-EssentialFirewall'
+Assert ($repRaw -match 'Test-NetworkChanged') 'repair.ps1 has Test-NetworkChanged'
+
+$wmiRaw = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
+Assert ($wmiRaw -match 'wmi-cooldown') 'wmi-repair.ps1 has WMI cooldown'
+
+& sc.exe config 'WireGuardTunnel$wgcf-profile' start= delayed-auto 2>$null | Out-Null
+$qc = & sc.exe qc 'WireGuardTunnel$wgcf-profile' 2>$null | Out-String
+Assert ($qc -match 'DELAYED') 'Tunnel service delayed-auto-start configured'
+
 Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat rescue script present'
 Assert (-not (Test-Path 'C:\WireGuard\install.inprogress')) 'install lock cleared after install'
+
+$cfg = Get-Content 'C:\WireGuard\wgcf-profile.conf' -Raw -EA SilentlyContinue
+Assert ($cfg -notmatch '::/0') 'Config has no ::/0 (IPv6 stripped)'
 
 Write-Host ''
 if ($failures.Count -gt 0) {

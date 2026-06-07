@@ -8,13 +8,13 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.9** is the current production release (install-safe, IPv6 stripped, WMI fixed, security-audit clean).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v11.0** is the current production release (self-repair, network-change detect, WMI cooldown, ultimate stress-tested).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v10.9](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.9)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v11.0](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v11.0)**.
 
 **Security check (after install):** run `scripts\security-audit.ps1` as Administrator — IP leak, DNS leak, IPv6, kill switch simulation.
 

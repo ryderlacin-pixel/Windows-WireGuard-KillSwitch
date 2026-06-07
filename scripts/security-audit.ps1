@@ -71,7 +71,7 @@ if ($conf -match 'AllowedIPs\s*=\s*0\.0\.0\.0/0') {
     Add-Result 'Tunnel' 'Full tunnel (0.0.0.0/0)' 'FAIL' 'Split tunnel risk - check AllowedIPs'
 }
 if ($conf -match '::/0') {
-    Add-Result 'Tunnel' 'IPv6 absent from AllowedIPs' 'FAIL' '::/0 still in config - run install.ps1 v10.9+'
+    Add-Result 'Tunnel' 'IPv6 absent from AllowedIPs' 'FAIL' '::/0 still in config - run install.ps1 v11.0+'
 } else {
     Add-Result 'Tunnel' 'IPv6 absent from AllowedIPs' 'PASS' 'AllowedIPs is IPv4-only'
 }
@@ -238,6 +238,9 @@ if ($tunnelUp) {
         $postBlock = Test-RuleEnabled 'KS-Block-WiFi-Out'
         $postInternet = Test-TcpHost '1.1.1.1' 443
         if ($postBlock) { break }
+        if ($w -eq 4) {
+            Start-Process powershell -ArgumentList '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\WireGuard\repair.ps1' -WindowStyle Hidden -EA SilentlyContinue
+        }
     }
     if ($postBlock) {
         Add-Result 'Kill Switch SIM' 'Block activates on tunnel down' 'PASS' "Within $($w * 2)s"
@@ -267,17 +270,24 @@ if (-not (Test-TunnelRunning)) {
     Start-Sleep 8
     if (Test-TunnelRunning) { Write-Host '[-->] Tunnel restored after audit' -ForegroundColor Green }
 }
+& sc.exe config 'WireGuardTunnel$wgcf-profile' start= delayed-auto 2>$null | Out-Null
+Start-Process powershell -ArgumentList '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\WireGuard\repair.ps1' -WindowStyle Hidden -EA SilentlyContinue
+schtasks /Run /TN '\WG-KillSwitch' 2>$null | Out-Null
 
-# --- PROCESS LAYERS (after sim — count settled state) ---
-Start-Sleep 5
+# --- PROCESS LAYERS (after sim — wait for monitor recovery) ---
 $monProcs = @()
-foreach ($shell in @('powershell','pwsh')) {
-    Get-Process $shell -EA SilentlyContinue | ForEach-Object {
-        try {
-            $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-            if ($c -match '(?:\\|/)monitor\.ps1(?:\s|"|$)') { $monProcs += $_ }
-        } catch {}
+for ($mw = 0; $mw -lt 12; $mw++) {
+    $monProcs = @()
+    foreach ($shell in @('powershell','pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if ($c -match '(?:\\|/)monitor\.ps1(?:\s|"|$)') { $monProcs += $_ }
+            } catch {}
+        }
     }
+    if ($monProcs.Count -ge 1) { break }
+    Start-Sleep -Seconds 3
 }
 if ($monProcs.Count -gt 1) {
     $monProcs | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object {
@@ -305,7 +315,7 @@ else { Add-Result 'Layers' 'WGKillSwitchSvc' 'WARN' 'Not running' }
 
 $wmi = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue | Where-Object { $_.Name -eq 'WGMonitorFilter' }
 if ($wmi) { Add-Result 'Layers' 'WMI subscription' 'PASS' 'ACTIVE' }
-else { Add-Result 'Layers' 'WMI subscription' 'FAIL' 'Missing - run install.ps1 v10.9+' }
+else { Add-Result 'Layers' 'WMI subscription' 'FAIL' 'Missing - run install.ps1 v11.0+' }
 
 # --- REPORT ---
 Write-Host ''
