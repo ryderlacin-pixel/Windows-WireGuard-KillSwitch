@@ -75,7 +75,7 @@ function Invoke-GH($Method, $Uri, $Body) {
         Uri     = $Uri
         Headers = $headers
     }
-    if ($Body) {
+    if ($null -ne $Body) {
         $params.Body = ConvertTo-JsonUtf8 $Body
         $params.ContentType = "application/json; charset=utf-8"
     }
