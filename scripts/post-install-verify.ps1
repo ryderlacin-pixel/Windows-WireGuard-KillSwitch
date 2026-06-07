@@ -7,10 +7,10 @@ function Assert([bool]$cond, [string]$msg) {
     else { Write-Host "  [OK] $msg" -ForegroundColor Green }
 }
 
-Write-Host '=== POST-INSTALL VERIFICATION (v11.0) ===' -ForegroundColor Cyan
+Write-Host '=== POST-INSTALL VERIFICATION (v11.2) ===' -ForegroundColor Cyan
 
 $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
-Assert ($reg.Version -eq '11.0') "Registry version 11.0 (got $($reg.Version))"
+Assert ($reg.Version -ge '11.0') "Registry version 11.0+ (got $($reg.Version))"
 
 foreach ($f in @('monitor.ps1','repair.ps1','service-monitor.ps1','wmi-repair.ps1','wgcf-profile.conf')) {
     Assert (Test-Path "C:\WireGuard\$f") "File exists: $f"
@@ -117,7 +117,7 @@ Assert ($null -ne $wmi) 'WMI subscription active'
 
 # v11.0 script version + self-repair checks
 $monRaw = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
-Assert ($monRaw -match 'v11\.0') 'monitor.ps1 is v11.0'
+Assert ($monRaw -match 'v11\.') 'monitor.ps1 is v11.x'
 Assert ($monRaw -match 'Test-SafeToOpen') 'monitor.ps1 has Test-SafeToOpen'
 Assert ($monRaw -match 'Test-InstallInProgress|monitor\.pid') 'monitor has install-safe logic'
 

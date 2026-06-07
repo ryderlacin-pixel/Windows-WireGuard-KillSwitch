@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v11.1)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v11.2)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,7 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v11.2: post-reboot auto-verify task (WG-RebootVerify, 5min after boot).
 # - v11.1: monitor singleton hardening — single launcher, periodic dedupe, stale PID cleanup.
 # - v11.0: ultimate hardening — firewall/config self-repair, network change detect, WMI cooldown,
 #   2min repair cadence, delayed-auto enforcement, boot/GPO resilience, stress-test gate.
@@ -63,6 +64,8 @@ $TUNNEL_NAME  = "wgcf-profile"
 $TUNNEL_SVC   = "WireGuardTunnel`$wgcf-profile"
 $TASK_MONITOR = "WG-KillSwitch"
 $TASK_REPAIR  = "WG-RepairTask"
+$TASK_REBOOT_VERIFY = "WG-RebootVerify"
+$REBOOT_VERIFY_PS1  = "$INSTALL_DIR\post-reboot-verify.ps1"
 $WG_SVC_NAME  = "WGKillSwitchSvc"
 $WMI_FILTER   = "WGMonitorFilter"
 $WMI_CONSUMER = "WGMonitorConsumer"
@@ -627,6 +630,7 @@ Remove-TaskFully $TASK_REPAIR
 Remove-TaskFully "WireGuard-KillSwitch-Monitor"
 Remove-TaskFully "WG-OnarimGorevi"
 Remove-TaskFully "WG-RepairTask"
+Remove-TaskFully "WG-RebootVerify"
 
 $oldSvc = & sc.exe query $WG_SVC_NAME 2>$null
 if ($oldSvc) {
@@ -1692,6 +1696,40 @@ if ($g2) { OK "WG-RepairTask registered ($($g2.State)) - 30s boot delay + every 
 else      { Write-Err "WG-RepairTask registration FAILED!" }
 
 # ================================================================
+Write-Step "STEP 12b - POST-REBOOT VERIFY TASK (5min boot delay)"
+# ================================================================
+$repoScripts = Join-Path $PSScriptRoot 'scripts'
+$rebootVerifySrc = Join-Path $repoScripts 'post-reboot-verify.ps1'
+if (Test-Path $rebootVerifySrc) {
+    Copy-Item $rebootVerifySrc $REBOOT_VERIFY_PS1 -Force
+    OK "post-reboot-verify.ps1 deployed"
+} else {
+    WARN "post-reboot-verify.ps1 source missing in repo"
+}
+Remove-TaskFully $TASK_REBOOT_VERIFY
+$actionRvParams = @{
+    Execute  = "powershell.exe"
+    Argument = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REBOOT_VERIFY_PS1`""
+}
+$actionRv   = New-ScheduledTaskAction @actionRvParams
+$triggerRv  = New-ScheduledTaskTrigger -AtStartup
+$triggerRv.Delay = "PT5M"
+$settingsRvParams = @{
+    ExecutionTimeLimit         = (New-TimeSpan -Minutes 15)
+    StartWhenAvailable         = $true
+    AllowStartIfOnBatteries    = $true
+    DontStopIfGoingOnBatteries = $true
+    RunOnlyIfNetworkAvailable  = $false
+    MultipleInstances          = 'IgnoreNew'
+}
+$settingsRv  = New-ScheduledTaskSettingsSet @settingsRvParams
+$principalRv = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName $TASK_REBOOT_VERIFY -Action $actionRv -Trigger $triggerRv -Settings $settingsRv -Principal $principalRv -Force | Out-Null
+$gRv = Get-ScheduledTask -TaskName $TASK_REBOOT_VERIFY -EA SilentlyContinue
+if ($gRv) { OK "WG-RebootVerify task registered ($($gRv.State)) - 5min after boot" }
+else       { WARN "WG-RebootVerify task registration failed" }
+
+# ================================================================
 Write-Step "STEP 13 - REGISTRY BACKUP + FOLDER PROTECTION"
 # ================================================================
 $acl = Get-Acl $INSTALL_DIR
@@ -1713,7 +1751,9 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.1"                              -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.2"                              -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  (Join-Path $PSScriptRoot 'scripts') -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RebootVerifyPath" $REBOOT_VERIFY_PS1             -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                             -Force
@@ -1899,6 +1939,11 @@ if ($g2) {
     else { WARN "WG-RepairTask: $tc trigger(s) (expected 2)"; $warnings++ }
 } else { Write-Err "WG-RepairTask MISSING"; $warnings++ }
 
+$gRv = Get-ScheduledTask -TaskName $TASK_REBOOT_VERIFY -EA SilentlyContinue
+if ($gRv -and $gRv.State -in @('Ready','Running')) { OK "WG-RebootVerify task: $($gRv.State)" }
+else { WARN "WG-RebootVerify task missing or disabled"; $warnings++ }
+if (Test-Path $REBOOT_VERIFY_PS1) { OK "post-reboot-verify.ps1: present" } else { WARN "post-reboot-verify.ps1: missing"; $warnings++ }
+
 Start-Sleep 3
 $proc = Get-MonitorShellProcs
 if (($proc | Measure-Object).Count -gt 1) {
@@ -1945,11 +1990,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v11.1 completed"
+Log "install.ps1 v11.2 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v11.1)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v11.2)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow
@@ -1969,6 +2014,8 @@ Write-Host "  [5] WMI Event Subscription: powershell death watch" -ForegroundCol
 Write-Host "  [6] Startup folder shortcut"                        -ForegroundColor DarkGray
 Write-Host "  [7] GPO Machine Startup Script"                     -ForegroundColor DarkGray
 Write-Host "  [8] HKLM Run key"                                   -ForegroundColor DarkGray
+Write-Host "  [9] WG-RebootVerify: auto audit 5min after boot"   -ForegroundColor DarkGray
+Write-Host "  Reboot log: C:\WireGuard\reboot-verify.log"         -ForegroundColor DarkGray
 Write-Host ""
 if ($CUSTOM_MODE) {
     Write-Host "  Custom server usage example:" -ForegroundColor White
