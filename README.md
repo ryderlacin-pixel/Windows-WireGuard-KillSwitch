@@ -1,8 +1,34 @@
 # Windows WireGuard Kill Switch (WARP Auto-Setup)
 
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE?logo=powershell&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
+![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
+
 > **One script. No config. No personal info. Full kill switch.**
 
 Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.0** is the production-hardened release with custom server support.
+
+**Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+  install["install.ps1"] --> tunnel["WireGuard Tunnel"]
+  install --> firewall["Firewall Rules KS-*"]
+  install --> layers["8 Recovery Layers"]
+  layers --> monitor["monitor.ps1"]
+  layers --> repair["onarim.ps1"]
+  layers --> tasks["WG-KillSwitch + WG-RepairTask"]
+  layers --> svc["WGKillSwitchSvc NSSM"]
+  layers --> wmi["WMI Subscription"]
+  monitor -->|"tunnel down"| block["Block Internet"]
+  monitor -->|"tunnel up"| open["Open Internet"]
+```
 
 ---
 
