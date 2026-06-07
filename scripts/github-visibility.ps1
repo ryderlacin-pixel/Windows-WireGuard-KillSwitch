@@ -43,7 +43,7 @@ function Invoke-GH($Method, $Uri, $Body, [hashtable]$Hdr = $headers) {
 Write-Host "=== GitHub Visibility Setup ===" -ForegroundColor Cyan
 
 # 1. Topics
-Write-Host "[1/4] Setting topics..." -ForegroundColor Yellow
+Write-Host "[1/5] Setting topics..." -ForegroundColor Yellow
 $topics = @(
     "wireguard", "warp", "cloudflare-warp", "kill-switch", "vpn",
     "windows", "powershell", "privacy", "firewall", "wgcf", "self-hosted"
@@ -54,14 +54,14 @@ try {
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
 # 2. Enable discussions
-Write-Host "[2/4] Enabling discussions..." -ForegroundColor Yellow
+Write-Host "[2/5] Enabling discussions..." -ForegroundColor Yellow
 try {
     Invoke-GH PATCH "https://api.github.com/repos/$Owner/$Repo" @{ has_discussions = $true }
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
-# 3. GitHub Release v10.0
-Write-Host "[3/4] Creating release v10.0..." -ForegroundColor Yellow
+# 3. GitHub Releases
+Write-Host "[3/5] Creating releases..." -ForegroundColor Yellow
 $releaseBody = @"
 ## v10.0 — Production-hardened kill switch
 
@@ -89,25 +89,46 @@ monitor.ps1 · repair.ps1 · WG-KillSwitch task · WG-RepairTask · WGKillSwitch
 
 MIT licensed — no personal data in repo.
 "@
-try {
-    $existing = Invoke-GH GET "https://api.github.com/repos/$Owner/$Repo/releases/tags/v10.0" $null
-    if ($existing) { Write-Host "  SKIP: v10.0 release already exists" -ForegroundColor Gray }
-} catch {
+function New-ReleaseIfMissing($tag, $name, $body) {
     try {
-        Invoke-GH POST "https://api.github.com/repos/$Owner/$Repo/releases" @{
-            tag_name         = "v10.0"
-            target_commitish = "main"
-            name             = "v10.0 — Production-hardened kill switch"
-            body             = $releaseBody
-            draft            = $false
-            prerelease       = $false
-        }
-        Write-Host "  OK" -ForegroundColor Green
-    } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
+        $null = Invoke-GH GET "https://api.github.com/repos/$Owner/$Repo/releases/tags/$tag" $null
+        Write-Host "  SKIP: $tag release already exists" -ForegroundColor Gray
+    } catch {
+        try {
+            Invoke-GH POST "https://api.github.com/repos/$Owner/$Repo/releases" @{
+                tag_name         = $tag
+                target_commitish = "main"
+                name             = $name
+                body             = $body
+                draft            = $false
+                prerelease       = $false
+            } | Out-Null
+            Write-Host "  OK: $tag" -ForegroundColor Green
+        } catch { Write-Host "  FAIL $tag : $($_.Exception.Message)" -ForegroundColor Red }
+    }
 }
+New-ReleaseIfMissing "v10.0" "v10.0 — Production-hardened kill switch" $releaseBody
+
+$releaseBodyV101 = @"
+## v10.1 — English script names + docs
+
+- Generated scripts renamed: ``repair.ps1``, ``service-monitor.ps1``, ``wmi-repair.ps1``
+- Monitor functions Englishized (``Test-Internet``, ``Enable-Block``, ``Disable-Block``, etc.)
+- Legacy Turkish filenames removed on upgrade reinstall
+- ``CONTRIBUTING.md`` + launch/promotion docs
+
+### Install
+``````powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1
+``````
+
+**Repo:** https://github.com/$Owner/$Repo
+"@
+New-ReleaseIfMissing "v10.1" "v10.1 — English script names + docs" $releaseBodyV101
 
 # 4. Profile bio
-Write-Host "[4/4] Updating profile bio..." -ForegroundColor Yellow
+Write-Host "[4/5] Updating profile bio..." -ForegroundColor Yellow
 try {
     Invoke-GH PATCH "https://api.github.com/user" @{
         bio = "Windows WireGuard + WARP kill switch — one PowerShell script, 8 recovery layers"
@@ -115,9 +136,11 @@ try {
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
-Write-Host ""
-Write-Host "=== Manual step (no API) ===" -ForegroundColor Cyan
-Write-Host "Pin repo: https://github.com/$Owner?tab=repositories"
+Write-Host "[5/5] Pin repo (manual — no API)..." -ForegroundColor Yellow
+Write-Host "  https://github.com/$Owner?tab=repositories"
 Write-Host "  -> Customize pins -> Windows-WireGuard-KillSwitch"
+Write-Host ""
+Write-Host "Next: Reddit posts -> docs/PROMOTION.md"
+Write-Host "      Full checklist -> docs/LAUNCH_CHECKLIST.md"
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
