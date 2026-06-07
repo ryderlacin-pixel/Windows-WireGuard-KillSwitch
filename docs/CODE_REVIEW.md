@@ -2,7 +2,7 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v10.6](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.6)
+**Current release:** [v10.7](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.7)
 
 This document answers the questions raised during external review of v10.2–v10.3 and explains what changed in **v10.4**.
 
@@ -43,6 +43,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | Stale WARP server IPs in generated monitor | **Fixed in v10.6** | `Get-ResolvedServerIP` + periodic refresh in `Ensure-ServerRule` |
 | Log corruption when log mutex times out | **Fixed in v10.6** | Skip write if mutex not acquired |
 | `pwsh.exe` monitor invisible to WMI/repair | **Fixed in v10.6** | `Get-MonitorShellProcs` + WMI WQL includes `pwsh.exe` |
+| `Get-MainMonitorProcs()` parse error on PS 5.1 (script won't compile) | **Fixed in v10.7** | Removed broken alias; use `Get-MonitorShellProcs` |
+| repair/GPO out of sync with monitor SafeToOpen | **Fixed in v10.7** | `Sync-KillSwitchState` in repair; GPO waits `Test-SafeToOpen` |
+| `Ensure-ServerRule` netsh delete/add every 5s | **Fixed in v10.7** | `Set-ServerRule` only on IP change or missing rule |
+| `Test-Internet` single-host / OR-only | **Fixed in v10.7** | 2-of-3 hosts (1.1.1.1, 1.0.0.1, 8.8.8.8) |
 | Task Scheduler `P9999D` repetition duration fails on some builds | **Fixed** | `RepetitionDuration = 3650 days` (10 years) |
 | WMI looks like overkill / security risk | **By design** | See [Why WMI?](#why-wmi) below |
 | 1200-line monolithic script | **Acknowledged** | Single-file installer is intentional — generates runtime scripts to `C:\WireGuard\`; see [Why one file?](#why-one-file) |
@@ -196,5 +200,6 @@ All reports must be in **English**.
 | v10.4 | All v10.2–v10.3 review items addressed; design doc in `install.ps1` header |
 | v10.5 | AbandonedMutexException-safe mutex waits (monitor respawn after kill) |
 | v10.6 | Zombie-tunnel prevention, tethering/PPP blocks, runtime WARP IP refresh, pwsh support |
+| v10.7 | Parse fix, layer sync (`Sync-KillSwitchState`), conditional server rule, 30-assertion test suite |
 
 See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases) for full notes per version.

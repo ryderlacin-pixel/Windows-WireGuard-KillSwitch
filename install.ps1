@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.6)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v10.7)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -24,6 +24,8 @@
 # - Internet opens only when tunnel is RUNNING and Test-Internet passes (zombie-tunnel leak prevention).
 # - Block rules cover wireless, LAN, remoteaccess (tethering), and PPP interfaces.
 # - WARP mode refreshes Cloudflare server IPs at runtime; log writes skip if mutex times out.
+# - All layers (monitor/repair/GPO) share SafeToOpen logic; repair syncs firewall state every run.
+# - Test-Internet requires 2 of 3 hosts (1.1.1.1, 1.0.0.1, 8.8.8.8); server rule rewrite only on IP change.
 #
 # If you see WMI and think "overkill": It is intentional.
 # Without it, killing the PowerShell process would silently disable the kill switch.
@@ -35,9 +37,10 @@ param(
     [string]$CustomEndpointIP = "",  # Server IP or CIDR (e.g. "1.2.3.4/32")
     [int]$CustomPort          = 0    # WireGuard port (default: 2408)
 )
-$ErrorActionPreference = "SilentlyContinue"
+# Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
+$ErrorActionPreference = "Continue"
 
-# â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
 $CONFIG      = "C:\WireGuard\wgcf-profile.conf"
 $LOG         = "C:\WireGuard\killswitch.log"
@@ -49,7 +52,7 @@ $WG_EXE      = "C:\Program Files\WireGuard\wireguard.exe"
 $WGCF_EXE    = "$INSTALL_DIR\wgcf.exe"
 $NSSM        = "$INSTALL_DIR\nssm.exe"
 
-# â”€â”€ Names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -- Names --
 $TUNNEL_NAME  = "wgcf-profile"
 $TUNNEL_SVC   = "WireGuardTunnel`$wgcf-profile"
 $TASK_MONITOR = "WG-KillSwitch"
@@ -63,13 +66,13 @@ $GPO_SCRIPT   = "$GPO_SCRIPT_DIR\wg-startup.ps1"
 $GPO_INI_DIR  = "C:\Windows\System32\GroupPolicy\Machine\Scripts"
 $GPO_INI      = "$GPO_INI_DIR\scripts.ini"
 
-# â”€â”€ Custom mode (full validation in STEP 0) â”€â”€
-$CUSTOM_MODE = ($CustomConfig -ne "" -or $CustomEndpointIP -ne "")
+# -- Custom mode (full validation in STEP 0) --
+$CUSTOM_MODE = ($CustomConfig -ne "")
 if ($CUSTOM_MODE) {
     Write-Host " [--] Custom server mode active" -ForegroundColor Cyan
 }
 
-# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -- Helpers --
 function Write-Step([string]$Title) {
     Write-Host "`n================================================================" -ForegroundColor Cyan
     Write-Host " $Title" -ForegroundColor White
@@ -98,7 +101,30 @@ function Test-TcpHost([string]$HostName, [int]$Port, [int]$TimeoutMs = 4000) {
 }
 
 function Test-Internet {
-    return (Test-TcpHost '1.1.1.1' 443) -or (Test-TcpHost '1.0.0.1' 443)
+    $hits = 0
+    foreach ($h in @('1.1.1.1', '1.0.0.1', '8.8.8.8')) {
+        if (Test-TcpHost $h 443) { $hits++ }
+    }
+    return ($hits -ge 2)
+}
+
+function Get-PreferredShell {
+    $pwshPath = "${env:ProgramFiles}\PowerShell\7\pwsh.exe"
+    if (Test-Path $pwshPath) { return $pwshPath }
+    $cmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+}
+
+function Start-HiddenScript([string]$ScriptPath) {
+    $shell = Get-PreferredShell
+    $argList = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    Start-Process -FilePath $shell -ArgumentList $argList -WindowStyle Hidden
+}
+
+function Test-FirewallRuleEnabled([string]$RuleName) {
+    $out = netsh advfirewall firewall show rule name="$RuleName" 2>$null
+    return ($out -match 'Enabled:\s+Yes')
 }
 
 function Test-SafeToOpen {
@@ -152,8 +178,6 @@ function Get-MonitorShellProcs() {
     }
     return $found
 }
-
-function Get-MainMonitorProcs() { return Get-MonitorShellProcs() }
 
 function Update-GpoScriptsIni($iniPath, $scriptPath) {
     New-Item -ItemType Directory -Path (Split-Path $iniPath) -Force -EA SilentlyContinue | Out-Null
@@ -280,6 +304,9 @@ if (-not (Test-Path $WG_EXE)) {
     } catch { Write-Err "WireGuard download/install error: $_"; pause; exit 1 }
 } else { OK "WireGuard already present" }
 
+if ($CustomConfig -ne "" -and $CustomEndpointIP -ne "" -and -not $CUSTOM_MODE) {
+    Write-Err "-CustomEndpointIP requires -CustomConfig"; pause; exit 1
+}
 if ($CUSTOM_MODE) {
     if ($CustomConfig -eq "" -or -not (Test-Path $CustomConfig)) {
         Write-Err "Custom mode requires -CustomConfig pointing to an existing .conf file"; pause; exit 1
@@ -546,7 +573,7 @@ $monitorPort       = $serverPort
 $monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 
 $monitorContent = @"
-# WireGuard Kill Switch - Monitor v10.6 (auto-generated by install.ps1)
+# WireGuard Kill Switch - Monitor v10.7 (auto-generated by install.ps1)
 `$TUNNEL_SVC   = '$monitorTunnelSvc'
 `$TUNNEL_NAME  = '$monitorTunnelName'
 `$CONFIG       = '$monitorConfig'
@@ -602,11 +629,29 @@ function Test-TcpHost([string]`$HostName, [int]`$Port, [int]`$TimeoutMs = 4000) 
 }
 
 function Test-Internet {
-    return (Test-TcpHost '1.1.1.1' 443) -or (Test-TcpHost '1.0.0.1' 443)
+    `$hits = 0
+    foreach (`$h in @('1.1.1.1', '1.0.0.1', '8.8.8.8')) {
+        if (Test-TcpHost `$h 443) { `$hits++ }
+    }
+    return (`$hits -ge 2)
 }
 
 function Test-SafeToOpen {
     return (Test-TunnelRunning) -and (Test-Internet)
+}
+
+function Test-ServerRulePresent {
+    try {
+        `$out = netsh advfirewall firewall show rule name="KS-WARP-Server-Out" 2>`$null
+        if (`$out -notmatch 'Enabled:\s+Yes') { return `$false }
+        `$firstIp = (`$script:SERVER_IP -split ',')[0]
+        return (`$out -match [regex]::Escape(`$firstIp))
+    } catch { return `$false }
+}
+
+function Set-ServerRule {
+    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$script:SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
 }
 
 function Get-ResolvedServerIP {
@@ -664,17 +709,18 @@ function Disable-Block {
 
 function Ensure-ServerRule {
     `$script:ServerIPRefreshTick++
-    if (`$script:ServerIPRefreshTick -ge 60 -or -not `$script:LastServerIP) {
+    `$rewrite = -not `$script:LastServerIP
+    if (`$script:ServerIPRefreshTick -ge 60) {
         `$script:ServerIPRefreshTick = 0
         `$resolved = Get-ResolvedServerIP
         if (`$resolved -ne `$script:LastServerIP) {
             `$script:LastServerIP = `$resolved
             `$script:SERVER_IP = `$resolved
             Log "Server IPs refreshed: `$resolved"
+            `$rewrite = `$true
         }
     }
-    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$script:SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
+    if (`$rewrite -or -not (Test-ServerRulePresent)) { Set-ServerRule }
 }
 
 function Try-ReinstallTunnel {
@@ -711,7 +757,7 @@ try {
     exit 1
 }
 
-Log "=== Monitor started (v10.6) ==="
+Log "=== Monitor started (v10.7) ==="
 
 try {
     `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
@@ -836,6 +882,7 @@ $repairTunnelSvc  = $TUNNEL_SVC
 $repairTunnelName = $TUNNEL_NAME
 $repairConfig     = $CONFIG
 $repairSvcName    = $WG_SVC_NAME
+$repairServerPort = $serverPort
 
 # NOTE: repair.ps1 uses a single-quoted here-string (@' '@) for all static content.
 # Variables that must expand at install-time are injected via direct string concatenation.
@@ -851,7 +898,11 @@ $LOCK         = "C:\WireGuard\repair.lock"
 `$TUNNEL_NAME = '$repairTunnelName'
 `$CONFIG      = '$repairConfig'
 `$WG_SVC_NAME = '$repairSvcName'
+`$REG_KEY     = 'HKLM:\SOFTWARE\WGKillSwitch'
+`$SERVER_PORT = '$repairServerPort'
 "@ + @'
+
+$ErrorActionPreference = "SilentlyContinue"
 
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
     try { return $Mutex.WaitOne($TimeoutMs) }
@@ -869,6 +920,90 @@ function Log($m) {
             if ($s.Count -gt 500) { $s | Select-Object -Last 250 | Set-Content $LOG -Encoding UTF8 -Force }
         } catch {}
     } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
+}
+
+function Test-TunnelRunning {
+    try {
+        $svc = Get-Service -Name $TUNNEL_SVC -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') { return $true }
+    } catch {}
+    return ([bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING"))
+}
+
+function Test-TcpHost([string]$HostName, [int]$Port, [int]$TimeoutMs = 4000) {
+    $tcp = $null
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $iar = $tcp.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { return $false }
+        try { $tcp.EndConnect($iar) } catch { return $false }
+        return $true
+    } catch { return $false }
+    finally { if ($tcp) { try { $tcp.Close() } catch {} } }
+}
+
+function Test-Internet {
+    $hits = 0
+    foreach ($h in @('1.1.1.1', '1.0.0.1', '8.8.8.8')) {
+        if (Test-TcpHost $h 443) { $hits++ }
+    }
+    return ($hits -ge 2)
+}
+
+function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
+
+function Get-RepairServerIP {
+    try {
+        $reg = Get-ItemProperty $REG_KEY -EA SilentlyContinue
+        if ($reg.ServerIP) { return [string]$reg.ServerIP }
+    } catch {}
+    return '162.159.192.0/24,104.16.0.0/13'
+}
+
+function Enable-Block {
+    $serverIp = Get-RepairServerIP
+    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          2>$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out"     dir=out action=block interfacetype=lan         remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-RemoteAccess-Out" dir=out action=block interfacetype=remoteaccess remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall add rule name="KS-Block-PPP-Out"          dir=out action=block interfacetype=ppp          remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
+    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIp remoteport=$SERVER_PORT enable=yes | Out-Null
+}
+
+function Disable-Block {
+    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          2>$null | Out-Null
+}
+
+function Sync-KillSwitchState {
+    if (Test-SafeToOpen) {
+        Disable-Block
+        Log "Sync: healthy - internet open"
+    } else {
+        Enable-Block
+        if (Test-TunnelRunning) { Log "Sync: zombie tunnel - block active" }
+        else { Log "Sync: tunnel down - block active" }
+    }
+}
+
+function Get-PreferredShell {
+    $pwshPath = "${env:ProgramFiles}\PowerShell\7\pwsh.exe"
+    if (Test-Path $pwshPath) { return $pwshPath }
+    $cmd = Get-Command pwsh -EA SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+}
+
+function Start-HiddenScript([string]$ScriptPath) {
+    $shell = Get-PreferredShell
+    $argList = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    Start-Process -FilePath $shell -ArgumentList $argList -WindowStyle Hidden
 }
 
 if (Test-Path $LOCK) {
@@ -956,7 +1091,7 @@ try {
         schtasks /Run /TN $taskRun 2>$null | Out-Null
         Start-Sleep 4
         if (-not (GetMonitorShellProcs)) {
-            Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$MONITOR`"" -WindowStyle Hidden
+            Start-HiddenScript $MONITOR
             Log "Monitor started directly"
         }
     } elseif (($procs | Measure-Object).Count -gt 1) {
@@ -965,6 +1100,8 @@ try {
             Log "Duplicate main monitor killed (PID: $($_.Id))"
         }
     }
+
+    Sync-KillSwitchState
 } finally {
     Remove-Item $LOCK -Force -EA SilentlyContinue
 }
@@ -976,7 +1113,7 @@ OK "repair.ps1 written"
 Write-Step "STEP 9 - WMI WRAPPER"
 # ================================================================
 @'
-# WMI Repair Wrapper v10.6 (auto-generated by install.ps1)
+# WMI Repair Wrapper v10.7 (auto-generated by install.ps1)
 $LOG    = 'C:\WireGuard\killswitch.log'
 $REPAIR = 'C:\WireGuard\repair.ps1'
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
@@ -1009,11 +1146,21 @@ function GetMonitorShellProcs() {
 }
 Start-Sleep -Seconds 2
 $proc = GetMonitorShellProcs
+function Get-PreferredShell {
+    $pwshPath = "${env:ProgramFiles}\PowerShell\7\pwsh.exe"
+    if (Test-Path $pwshPath) { return $pwshPath }
+    $cmd = Get-Command pwsh -EA SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+}
+function Start-HiddenScript([string]$ScriptPath) {
+    $shell = Get-PreferredShell
+    $argList = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    Start-Process -FilePath $shell -ArgumentList $argList -WindowStyle Hidden
+}
 if (-not $proc) {
     Log "Main monitor gone - triggering repair"
-    if (Test-Path $REPAIR) {
-        Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR`"" -WindowStyle Hidden
-    }
+    if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 } else {
     Log "WMI triggered but main monitor still running - no action"
 }
@@ -1024,7 +1171,7 @@ OK "wmi-repair.ps1 written"
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
 @'
-# WGKillSwitchSvc wrapper v10.6 (auto-generated by install.ps1)
+# WGKillSwitchSvc wrapper v10.7 (auto-generated by install.ps1)
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
@@ -1063,15 +1210,25 @@ function RepairCooldownActive {
         return ((Get-Date) -lt $t.AddMinutes(2))
     } catch { return $false }
 }
+function Get-PreferredShell {
+    $pwshPath = "${env:ProgramFiles}\PowerShell\7\pwsh.exe"
+    if (Test-Path $pwshPath) { return $pwshPath }
+    $cmd = Get-Command pwsh -EA SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+}
+function Start-HiddenScript([string]$ScriptPath) {
+    $shell = Get-PreferredShell
+    $argList = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    Start-Process -FilePath $shell -ArgumentList $argList -WindowStyle Hidden
+}
 function TriggerRepair([string]$reason) {
     if (RepairCooldownActive) { return }
     Set-Content $COOLDOWN (Get-Date -Format 'o') -Force -EA SilentlyContinue
     Log $reason
-    if (Test-Path $REPAIR) {
-        Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR`"" -WindowStyle Hidden
-    }
+    if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 }
-Log "WGKillSwitchSvc started (v10.6)"
+Log "WGKillSwitchSvc started (v10.7)"
 Start-Sleep -Seconds 20
 TriggerRepair "Initial repair triggered"
 while ($true) {
@@ -1185,7 +1342,7 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.6"                              -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "10.7"                              -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                             -Force
@@ -1273,9 +1430,11 @@ Write-Step "STEP 17 - GPO BOOT SCRIPT"
 New-Item -ItemType Directory -Path $GPO_SCRIPT_DIR -Force -EA SilentlyContinue | Out-Null
 $gpoTunnelSvc = $TUNNEL_SVC
 $gpoContent = @"
-# WG KillSwitch GPO Boot Script (auto-generated by install.ps1)
-`$LOG    = 'C:\WireGuard\killswitch.log'
-`$REPAIR = 'C:\WireGuard\repair.ps1'
+# WG KillSwitch GPO Boot Script v10.7 (auto-generated by install.ps1)
+`$LOG        = 'C:\WireGuard\killswitch.log'
+`$REPAIR     = 'C:\WireGuard\repair.ps1'
+`$TUNNEL_SVC = '$gpoTunnelSvc'
+`$ErrorActionPreference = 'SilentlyContinue'
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
     catch [System.Threading.AbandonedMutexException] { return `$true }
@@ -1288,15 +1447,48 @@ function Log(`$m) {
         Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [GPO] `$m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
-Log "GPO boot script fired"
+function Test-TunnelRunning {
+    return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match "RUNNING"))
+}
+function Test-TcpHost([string]`$HostName, [int]`$Port, [int]`$TimeoutMs = 4000) {
+    `$tcp = `$null
+    try {
+        `$tcp = New-Object System.Net.Sockets.TcpClient
+        `$iar = `$tcp.BeginConnect(`$HostName, `$Port, `$null, `$null)
+        if (-not `$iar.AsyncWaitHandle.WaitOne(`$TimeoutMs, `$false)) { return `$false }
+        try { `$tcp.EndConnect(`$iar) } catch { return `$false }
+        return `$true
+    } catch { return `$false }
+    finally { if (`$tcp) { try { `$tcp.Close() } catch {} } }
+}
+function Test-Internet {
+    `$hits = 0
+    foreach (`$h in @('1.1.1.1', '1.0.0.1', '8.8.8.8')) { if (Test-TcpHost `$h 443) { `$hits++ } }
+    return (`$hits -ge 2)
+}
+function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
+function Get-PreferredShell {
+    `$pwshPath = Join-Path `$env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (Test-Path `$pwshPath) { return `$pwshPath }
+    `$cmd = Get-Command pwsh -EA SilentlyContinue
+    if (`$cmd) { return `$cmd.Source }
+    return Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+}
+function Start-HiddenScript([string]`$ScriptPath) {
+    `$shell = Get-PreferredShell
+    Start-Process -FilePath `$shell -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$ScriptPath) -WindowStyle Hidden
+}
+Log "GPO boot script fired (v10.7)"
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 `$waited = 0
-while (`$waited -lt 60) {
-    if (( & sc.exe query "$gpoTunnelSvc" 2>`$null) -match "RUNNING") { break }
+while (`$waited -lt 90 -and -not (Test-SafeToOpen)) {
     Start-Sleep -Seconds 3; `$waited += 3
 }
+if (Test-SafeToOpen) { Log "GPO: healthy after `${waited}s (tunnel + internet)" }
+elseif (Test-TunnelRunning) { Log "GPO: zombie tunnel after `${waited}s - repair will sync block" }
+else { Log "GPO: tunnel down after `${waited}s - repair will sync block" }
 if (Test-Path `$REPAIR) {
-    Start-Process powershell.exe -ArgumentList "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ``"`$REPAIR``"" -WindowStyle Hidden
+    Start-HiddenScript `$REPAIR
     Log "Repair triggered (waited `${waited}s)"
 }
 "@
@@ -1317,6 +1509,17 @@ Write-Step "STEP 19 - FINAL CHECK"
 # ================================================================
 $warnings = 0
 if (Test-TunnelRunning) { OK "Tunnel: RUNNING" } else { WARN "Tunnel: DOWN (monitor will recover)"; $warnings++ }
+if (Test-SafeToOpen) {
+    OK "Health: tunnel + internet verified (SafeToOpen)"
+} elseif (Test-TunnelRunning) {
+    OK "Health: zombie protected (tunnel up, block should be active)"
+    foreach ($br in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
+        if (Test-FirewallRuleEnabled $br) { OK "Block rule active: $br" }
+        else { WARN "Block rule missing: $br"; $warnings++ }
+    }
+} else {
+    OK "Health: tunnel down (block rules expected)"
+}
 
 $g1 = Get-ScheduledTask -TaskName $TASK_MONITOR -EA SilentlyContinue
 $g2 = Get-ScheduledTask -TaskName $TASK_REPAIR  -EA SilentlyContinue
@@ -1328,11 +1531,11 @@ if ($g2) {
 } else { Write-Err "WG-RepairTask MISSING"; $warnings++ }
 
 Start-Sleep 3
-$proc = Get-MainMonitorProcs
+$proc = Get-MonitorShellProcs
 if (($proc | Measure-Object).Count -gt 1) {
     $proc | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object { Stop-Process -Id $_.Id -Force -EA SilentlyContinue }
     Start-Sleep 2
-    $proc = Get-MainMonitorProcs
+    $proc = Get-MonitorShellProcs
 }
 if ($proc) { OK "Monitor: active (PID: $(($proc | Select-Object -First 1).Id))" }
 else        { WARN "Monitor: not yet running" }
@@ -1372,11 +1575,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v10.6 completed"
+Log "install.ps1 v10.7 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.6)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v10.7)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow

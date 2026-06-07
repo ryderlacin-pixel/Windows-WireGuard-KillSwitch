@@ -8,13 +8,13 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.6** is the production-hardened release with custom server support.
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.7** is the production-hardened release with custom server support.
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)** — architecture, reviewer Q&A table, and what changed in v10.6. Latest release: **[v10.6](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.6)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)** — architecture, reviewer Q&A table, and what changed in v10.7. Latest release: **[v10.7](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.7)**.
 
 ---
 
@@ -259,6 +259,13 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ---
 
 ## Changelog
+
+### v10.7
+- **Critical:** Fixed PowerShell parse error (`Get-MainMonitorProcs` alias) — v10.6 `install.ps1` could not compile on PS 5.1
+- `repair.ps1` syncs firewall via `Sync-KillSwitchState` (same `Test-SafeToOpen` as monitor)
+- GPO boot waits for `Test-SafeToOpen`; `Ensure-ServerRule` only rewrites on IP change
+- `Test-Internet`: 2-of-3 hosts; `Get-PreferredShell` for repair/WMI/service/GPO
+- `scripts/test-suite.ps1`: 30-assertion offline quality gate
 
 ### v10.6
 - **Critical fix:** Internet opens only when tunnel is RUNNING **and** `Test-Internet` passes (zombie-tunnel leak prevention)
