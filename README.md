@@ -24,7 +24,7 @@ flowchart TB
   install --> firewall["Firewall Rules KS-*"]
   install --> layers["8 Recovery Layers"]
   layers --> monitor["monitor.ps1"]
-  layers --> repair["onarim.ps1"]
+  layers --> repair["repair.ps1"]
   layers --> tasks["WG-KillSwitch + WG-RepairTask"]
   layers --> svc["WGKillSwitchSvc NSSM"]
   layers --> wmi["WMI Subscription"]
@@ -100,7 +100,7 @@ Tunnel name defaults to the config filename (`myvpn.conf` → tunnel `myvpn`).
 
 \*If omitted, `Endpoint = IP:PORT` is parsed from the config file.
 
-Custom settings are baked into generated `monitor.ps1`, `onarim.ps1`, and GPO scripts at install time, and stored in `HKLM:\SOFTWARE\WGKillSwitch`.
+Custom settings are baked into generated `monitor.ps1`, `repair.ps1`, and GPO scripts at install time, and stored in `HKLM:\SOFTWARE\WGKillSwitch`.
 
 ---
 
@@ -132,7 +132,7 @@ If anything goes wrong (crash, update, kill), the system recovers automatically:
 | Layer | Description |
 |-------|-------------|
 | **monitor.ps1** | Main loop — checks tunnel every 5s, recovers if down |
-| **onarim.ps1** | System repair script — restarts missing components |
+| **repair.ps1** | System repair script — restarts missing components |
 | **WG-KillSwitch** | Scheduled task, runs at boot (60s delay) + restarts on failure |
 | **WG-RepairTask** | Scheduled task, runs at boot (30s delay) + every 5 minutes |
 | **WGKillSwitchSvc** | Windows service via NSSM, delayed-auto-start |
@@ -150,15 +150,18 @@ All layers are installed by `install.ps1`. Nothing needs to be done manually.
 |------|---------|
 | `wgcf-profile.conf` | WARP config (auto-generated) or your custom config path |
 | `monitor.ps1` | Main VPN monitor loop |
-| `onarim.ps1` | System repair script |
-| `servis-monitor.ps1` | NSSM service wrapper |
-| `wmi-onarim.ps1` | WMI event consumer wrapper |
+| `repair.ps1` | System repair script |
+| `service-monitor.ps1` | NSSM service wrapper |
+| `wmi-repair.ps1` | WMI event consumer wrapper |
+| `repair.lock` | Single-instance lock for repair script |
 | `killswitch.log` | Live log (max 500 lines, auto-rotated) |
 | `nssm.exe` | Service manager |
 | `wgcf.exe` | WARP config generator (WARP mode only) |
 | `WG-KillSwitch-backup.xml` | Task backup for self-repair |
 
 All files except the log are hidden/system-flagged and ACL-protected.
+
+> **Legacy installs (pre-v10.1):** Older versions used Turkish filenames (`onarim.ps1`, `servis-monitor.ps1`, `wmi-onarim.ps1`). Re-running `install.ps1` migrates to the English names above and removes the old files. Existing working installs do not need to be touched manually.
 
 ---
 
@@ -230,6 +233,11 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ---
 
 ## Changelog
+
+### v10.1
+- Script filenames and internal function names Englishized (`repair.ps1`, `service-monitor.ps1`, `wmi-repair.ps1`)
+- Installer removes legacy Turkish-named scripts on upgrade
+- Monitor uses `Test-Internet`, `Enable-Block`, `Disable-Block`, `Ensure-ServerRule`, `Try-ReinstallTunnel`
 
 ### v10.0
 - **Critical fix:** process detection no longer confuses `servis-monitor.ps1` with `monitor.ps1` (prevents monitor kill loop)

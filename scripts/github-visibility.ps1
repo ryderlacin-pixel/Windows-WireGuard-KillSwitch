@@ -77,7 +77,7 @@ Custom server:
 ``````
 
 ### Highlights
-- **Critical fix:** process detection no longer confuses ``servis-monitor.ps1`` with ``monitor.ps1``
+- **Critical fix:** process detection no longer confuses ``service-monitor.ps1`` with ``monitor.ps1``
 - Repair firewall check fixed (no false policy spam every 5 min)
 - Scheduled tasks survive battery mode
 - Service monitor 60s poll + 2-minute repair cooldown
@@ -85,7 +85,7 @@ Custom server:
 - Migrates legacy ``WG-OnarimGorevi`` to ``WG-RepairTask``
 
 ### Recovery layers (8)
-monitor.ps1 · onarim.ps1 · WG-KillSwitch task · WG-RepairTask · WGKillSwitchSvc · WMI · startup shortcut · GPO boot script
+monitor.ps1 · repair.ps1 · WG-KillSwitch task · WG-RepairTask · WGKillSwitchSvc · WMI · startup shortcut · GPO boot script
 
 MIT licensed — no personal data in repo.
 "@
