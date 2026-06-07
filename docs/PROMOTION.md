@@ -31,6 +31,12 @@ MIT licensed. No personal keys in the repo.
 Happy to answer questions in English.
 ```
 
+**Add this paragraph** to r/WireGuard / r/selfhosted posts (real-world angle):
+
+```
+**Real-world testing:** Tested in Turkey, where many websites are blocked by government filtering at the ISP level. Cloudflare WARP + this kill switch successfully bypassed most state-level blocks in daily use, while the firewall kill switch prevented leaks when the tunnel dropped. Validated across reboots on Windows 11 — not just a lab setup.
+```
+
 ---
 
 ## r/PowerShell — comment on modular-script thread (PRIORITY)

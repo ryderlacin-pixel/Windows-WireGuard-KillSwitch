@@ -10,7 +10,7 @@
 
 Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.0** is the production-hardened release with custom server support.
 
-**Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN
+**Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
@@ -42,6 +42,30 @@ flowchart TB
 4. **Installs 8 redundant recovery layers** so the VPN restarts automatically after crashes or reboots
 
 No personal data is stored anywhere. The WARP registration is completely anonymous.
+
+---
+
+## Real-world testing
+
+> **Tested in Turkey**, where many websites are blocked at the ISP level by government filtering (DNS/IP blocks, restricted access to social media, news, and international services).
+
+In that environment, the combination of **Cloudflare WARP + this kill switch** worked well in daily use:
+
+| Concern | How this setup handles it |
+|---------|---------------------------|
+| **State-level blocks** | WARP routes traffic through Cloudflare's network, bypassing most common ISP/DNS blocks for everyday browsing |
+| **VPN drops** | Kill switch blocks all outbound traffic immediately — no accidental leak onto a filtered or unprotected connection |
+| **Reboot / crash** | 8 recovery layers restart the tunnel automatically; block stays active until the tunnel is confirmed running |
+| **DNS leaks** | Firewall allows DNS only to `1.1.1.1` / `1.0.0.1`; all other DNS outbound is blocked |
+
+Validated on **Windows 11** with production use across multiple reboots (v10.0+). Not a lab test — real machine, real network, real blocks.
+
+**Caveats (honest):**
+- Effectiveness depends on the type of block (DNS, IP range, or deep packet inspection). WARP handles most ISP-level filtering; it is **not** a guarantee against every censorship technique.
+- WARP is Cloudflare's consumer VPN — throughput and latency vary by region.
+- Custom server mode (`-CustomConfig`) works the same way; point firewall rules at your own endpoint.
+
+*Personal testing note — not legal advice. Users are responsible for complying with local laws.*
 
 ---
 
@@ -235,6 +259,7 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ## Changelog
 
 ### v10.1
+- Real-world testing section (Turkey / ISP-level blocks + WARP + kill switch)
 - Script filenames and internal function names Englishized (`repair.ps1`, `service-monitor.ps1`, `wmi-repair.ps1`)
 - Installer removes legacy Turkish-named scripts on upgrade
 - Monitor uses `Test-Internet`, `Enable-Block`, `Disable-Block`, `Ensure-ServerRule`, `Try-ReinstallTunnel`
