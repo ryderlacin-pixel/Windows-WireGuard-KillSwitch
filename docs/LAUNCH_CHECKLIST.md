@@ -6,97 +6,59 @@ Complete these in order. **English only** for all public posts.
 
 ---
 
-## Current status (auto-checked 2026-06-07)
+## Current status (2026-06-08)
 
 | Item | Status | Action |
 |------|--------|--------|
 | Repo public | OK | — |
 | README + badges | OK | — |
-| Git tag `v10.0` | OK (local + remote) | — |
-| Git tag `v10.1` | Push after this doc | `git push origin v10.1` |
-| GitHub **Release** | **Missing** | Step 1 (token) or Step 1b (manual) |
-| **Topics** | **Empty** | Step 1 or 1b |
-| **Discussions** | **Off** | Step 1 or 1b |
-| Profile **bio** | **Empty** | Step 1 or edit profile |
-| Profile **pin** | Unknown | Step 2 (manual only) |
+| Git tags `v10.0` / `v10.1` / `v10.4` | OK | — |
+| GitHub **Release v10.0** | OK | — |
+| GitHub **Release v10.1** | OK | — |
+| GitHub **Release v10.4** | Run script | Step 1 below |
+| **Topics** | OK | — |
+| **Discussions** | OK | — |
+| **CODE_REVIEW.md** | OK | Link in README |
+| Profile **pin** | Manual | Step 2 |
 | Reddit posts | Not done | Step 3 (you, logged in) |
 
 ---
 
-## Step 1 — GitHub API (5 minutes, recommended)
+## Step 1 — Publish releases (2 minutes)
 
-### 1a. Create token
+### 1a. Create token (if needed)
 
-Open: https://github.com/settings/tokens/new
-
-| Field | Value |
-|-------|-------|
-| Note | `wg-killswitch-visibility` |
-| Expiration | 90 days |
-| Scopes | `repo`, `read:user`, `user:email` |
-
-Copy the token (`ghp_...`) — shown **once**.
+https://github.com/settings/tokens/new — scopes: `repo`, `read:user`, `user:email`
 
 ### 1b. Run script
 
 ```powershell
 $env:GITHUB_TOKEN = "ghp_paste_here"
 cd C:\Users\seyit\Windows-WireGuard-KillSwitch
-.\scripts\github-visibility.ps1
+.\scripts\publish-releases.ps1
 ```
 
-This sets topics, enables Discussions, creates releases, updates profile bio.
+Creates/updates **v10.0**, **v10.1**, **v10.4** with reviewer-focused release notes.
 
-### 1c. Revoke token (optional, after success)
+Full visibility (topics, bio, discussions): `.\scripts\github-visibility.ps1`
+
+### 1c. Revoke token after success
 
 https://github.com/settings/tokens
 
 ---
 
-## Step 1b — Manual GitHub (if no token)
-
-Do each link:
-
-1. **Topics:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/settings  
-   → Topics → add: `wireguard`, `warp`, `kill-switch`, `windows`, `powershell`, `vpn`, `firewall`, `privacy`, `wgcf`, `self-hosted`, `cloudflare-warp`
-
-2. **Discussions:** same Settings page → Features → **Discussions** ✓
-
-3. **Release v10.1:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/new  
-   - Tag: `v10.1` (create from `main`)  
-   - Title: `v10.1 — English script names + docs`  
-   - Description: copy from `README.md` changelog v10.1 + install snippet:
-   ```powershell
-   Set-ExecutionPolicy Bypass -Scope Process -Force
-   .\install.ps1
-   ```
-
-4. **Profile bio:** https://github.com/settings/profile  
-   → Bio: `Windows WireGuard + WARP kill switch — one PowerShell script, 8 recovery layers`
-
----
-
 ## Step 2 — Pin repo (manual, 30 seconds)
 
-1. https://github.com/ryderlacin-pixel?tab=repositories  
-2. **Customize your pins**  
+1. https://github.com/ryderlacin-pixel?tab=repositories
+2. **Customize your pins**
 3. Select **Windows-WireGuard-KillSwitch**
-
-No API exists for pins — this step is required.
 
 ---
 
 ## Step 3 — Reddit (you must be logged in)
 
-Reddit blocks automated posting from this environment. Copy-paste from `docs/PROMOTION.md`.
-
-| Priority | Where | What |
-|----------|-------|------|
-| 1 | [r/PowerShell thread](https://www.reddit.com/r/PowerShell/comments/1tza2u0/refactored_a_monolithic_script_into_a_modular/) | Comment (modular refactor context) |
-| 2 | [r/WireGuard](https://www.reddit.com/r/WireGuard/submit) | Standalone release post |
-| 3 | [r/selfhosted](https://www.reddit.com/r/selfhosted/submit) | Privacy / automation angle |
-
-**Quick open (PowerShell):**
+Copy-paste from `docs/PROMOTION.md`.
 
 ```powershell
 .\scripts\open-launch-links.ps1
@@ -104,50 +66,28 @@ Reddit blocks automated posting from this environment. Copy-paste from `docs/PRO
 
 ---
 
-## Step 4 — awesome-wireguard PR (optional, high value)
+## Step 4 — awesome-wireguard PR (optional)
 
-1. Fork: https://github.com/cedrick-f/awesome-wireguard  
-2. Add under **Windows** or **Tools**:
+Fork https://github.com/cedrick-f/awesome-wireguard and add:
 
 ```markdown
 - [Windows-WireGuard-KillSwitch](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch) — One-script WireGuard + WARP setup with firewall kill switch and 8 recovery layers for Windows.
 ```
 
-3. Open PR with title: `Add Windows-WireGuard-KillSwitch`
-
 ---
 
-## Step 5 — Hacker News (optional)
+## Step 5 — Point reviewers to CODE_REVIEW.md
 
-https://news.ycombinator.com/submit
+When sharing the repo with developers, link:
 
-- **Title:** `Show HN: Windows WireGuard kill switch – one PowerShell script, 8 recovery layers`
-- **URL:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch
-- First comment: short technical summary from README (English)
-
----
-
-## Step 6 — Verify (after Steps 1–3)
-
-```powershell
-# Topics visible on repo page?
-# Release badge on README working?
-# Discussions tab appears?
-```
-
-Check: https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch
-
----
-
-## What we cannot automate
-
-- Reddit login / posting (403 from bots; needs your session)
-- GitHub pin order (no public API)
-- GitHub topics/releases without your token (unless Step 1b manual)
+- https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/blob/main/docs/CODE_REVIEW.md
+- https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.4
 
 ---
 
 ## Copy-paste lives in
 
-- `docs/PROMOTION.md` — all post bodies
+- `docs/PROMOTION.md` — Reddit / forum posts
+- `docs/CODE_REVIEW.md` — reviewer Q&A
 - `docs/GITHUB_TOKEN.md` — token help
+- `scripts/publish-releases.ps1` — release note bodies

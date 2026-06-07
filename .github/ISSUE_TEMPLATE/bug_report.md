@@ -8,7 +8,7 @@ assignees: ''
 
 **Please write in English.** Non-English issues may be closed without review.
 
-**Version:** (e.g. v10.0 — check `HKLM:\SOFTWARE\WGKillSwitch`)
+**Version:** (e.g. v10.4 — check `Get-ItemProperty HKLM:\SOFTWARE\WGKillSwitch | Select Version`)
 
 **Windows version:** (e.g. Windows 11 23H2)
 

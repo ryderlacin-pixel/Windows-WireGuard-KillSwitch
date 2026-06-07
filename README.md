@@ -14,6 +14,8 @@ Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened ki
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)** — architecture, reviewer Q&A table, and what changed in v10.4. Latest release: **[v10.4](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.4)**.
+
 ---
 
 ## Architecture

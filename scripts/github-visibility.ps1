@@ -60,72 +60,14 @@ try {
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
-# 3. GitHub Releases
-Write-Host "[3/5] Creating releases..." -ForegroundColor Yellow
-$releaseBody = @'
-## v10.0 - Production-hardened kill switch
-
-### Install
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1
-```
-
-Custom server:
-```powershell
-.\install.ps1 -CustomConfig "C:\path\to\myvpn.conf"
-```
-
-### Highlights
-- **Critical fix:** process detection no longer confuses `service-monitor.ps1` with `monitor.ps1`
-- Repair firewall check fixed (no false policy spam every 5 min)
-- Scheduled tasks survive battery mode
-- Service monitor 60s poll + 2-minute repair cooldown
-- WMI + repair only target main `monitor.ps1`
-- Migrates legacy `WG-OnarimGorevi` to `WG-RepairTask`
-
-### Recovery layers (8)
-monitor.ps1 - repair.ps1 - WG-KillSwitch task - WG-RepairTask - WGKillSwitchSvc - WMI - startup shortcut - GPO boot script
-
-MIT licensed - no personal data in repo.
-'@
-function New-ReleaseIfMissing($tag, $name, $body) {
-    try {
-        $null = Invoke-GH GET "https://api.github.com/repos/$Owner/$Repo/releases/tags/$tag" $null
-        Write-Host "  SKIP: $tag release already exists" -ForegroundColor Gray
-    } catch {
-        try {
-            Invoke-GH POST "https://api.github.com/repos/$Owner/$Repo/releases" @{
-                tag_name         = $tag
-                target_commitish = "main"
-                name             = $name
-                body             = $body
-                draft            = $false
-                prerelease       = $false
-            } | Out-Null
-            Write-Host "  OK: $tag" -ForegroundColor Green
-        } catch { Write-Host "  FAIL $tag : $($_.Exception.Message)" -ForegroundColor Red }
-    }
+# 3. GitHub Releases (reviewer-focused notes)
+Write-Host "[3/5] Publishing releases..." -ForegroundColor Yellow
+$publishScript = Join-Path $PSScriptRoot "publish-releases.ps1"
+if (Test-Path $publishScript) {
+    & $publishScript -Token $Token -Owner $Owner -Repo $Repo
+} else {
+    Write-Host "  FAIL: publish-releases.ps1 not found" -ForegroundColor Red
 }
-New-ReleaseIfMissing "v10.0" "v10.0 - Production-hardened kill switch" $releaseBody
-
-$releaseBodyV101 = @'
-## v10.1 - English script names + docs
-
-- Generated scripts renamed: repair.ps1, service-monitor.ps1, wmi-repair.ps1
-- Monitor functions Englishized (Test-Internet, Enable-Block, Disable-Block, etc.)
-- Legacy Turkish filenames removed on upgrade reinstall
-- CONTRIBUTING.md + launch/promotion docs
-
-### Install
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1
-```
-
-**Repo:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch
-'@
-New-ReleaseIfMissing "v10.1" "v10.1 - English script names + docs" $releaseBodyV101
 
 # 4. Profile bio
 Write-Host "[4/5] Updating profile bio..." -ForegroundColor Yellow

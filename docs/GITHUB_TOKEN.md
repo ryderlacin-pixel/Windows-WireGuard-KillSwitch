@@ -38,12 +38,14 @@ cd C:\Users\seyit\Windows-WireGuard-KillSwitch
 .\scripts\github-visibility.ps1
 ```
 
-The script will:
+Scripts:
 
-- Add repository topics (`wireguard`, `kill-switch`, `powershell`, …)
-- Enable Discussions
-- Create the `v10.0` GitHub Release (if missing)
-- Update your profile bio
+| Script | Purpose |
+|--------|---------|
+| `scripts/publish-releases.ps1` | Create/update v10.0, v10.1, v10.4 releases (reviewer notes) |
+| `scripts/github-visibility.ps1` | Topics, Discussions, releases, profile bio (all-in-one) |
+
+`publish-releases.ps1` is the fastest path when you only need release pages updated.
 
 ---
 

@@ -31,6 +31,18 @@ Non-English issues or PRs may be closed without review.
 
 This repo ships a single installer (`install.ps1`) that generates runtime scripts under `C:\WireGuard\` on the target machine. Keep changes minimal and consistent with the existing PowerShell style.
 
+## Code review
+
+Before opening a design or security question, read **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. It documents:
+
+- Responses to reviewer feedback (v10.2 → v10.4)
+- Why WMI and 8 recovery layers exist
+- Firewall model and verification commands
+
+Use the **[Code review issue template](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/issues/new?template=code_review.md)** for architecture questions.
+
+After changing `install.ps1`, update `docs/CODE_REVIEW.md` and release notes in `scripts/publish-releases.ps1` if behavior changes.
+
 ## Questions
 
 Open a [GitHub issue](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/issues) in English. For promotion copy, see `docs/PROMOTION.md`.
