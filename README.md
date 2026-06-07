@@ -8,13 +8,13 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.4** is the production-hardened release with custom server support.
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v10.5** is the production-hardened release with custom server support.
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)** — architecture, reviewer Q&A table, and what changed in v10.4. Latest release: **[v10.4](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.4)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)** — architecture, reviewer Q&A table, and what changed in v10.5. Latest release: **[v10.5](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.5)**.
 
 ---
 
@@ -259,6 +259,11 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ---
 
 ## Changelog
+
+### v10.5
+- **Critical fix:** `AbandonedMutexException` on main monitor mutex no longer causes `exit 0` (monitor could never respawn after Task Manager kill)
+- Shared `Wait-NamedMutex` helper across monitor, repair, WMI, service, GPO, and installer log paths
+- Tunnel reinstall mutex (`WGTunnelInstallMutex`) uses same abandoned-mutex-safe wait
 
 ### v10.4
 - Hardened `Test-Internet` (requires successful TCP connect, not just async timeout)

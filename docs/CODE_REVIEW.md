@@ -2,7 +2,7 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v10.4](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.4)
+**Current release:** [v10.5](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.5)
 
 This document answers the questions raised during external review of v10.2–v10.3 and explains what changed in **v10.4**.
 
@@ -36,6 +36,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | IPv6 / NAT64 leak paths | **Fixed** | Extended ranges: `::1/128`, `64:ff9b::/96`, `64:ff9b:1::/48`, `100::/64` + adapter binding disable |
 | `wireguard.exe` blocked by catch-all rules | **Fixed** | `KS-WireGuard-EXE` allow rule for `C:\Program Files\WireGuard\wireguard.exe` |
 | Duplicate monitor processes after reboot | **Fixed** | `Global\WGMainMonitorMutex` — second instance exits immediately |
+| `AbandonedMutexException` kills respawned monitor (`catch { exit 0 }`) | **Fixed in v10.5** | `Wait-NamedMutex` treats abandonment as successful acquire (MS docs); duplicate instance still exits on `WaitOne` timeout |
 | Task Scheduler `P9999D` repetition duration fails on some builds | **Fixed** | `RepetitionDuration = 3650 days` (10 years) |
 | WMI looks like overkill / security risk | **By design** | See [Why WMI?](#why-wmi) below |
 | 1200-line monolithic script | **Acknowledged** | Single-file installer is intentional — generates runtime scripts to `C:\WireGuard\`; see [Why one file?](#why-one-file) |
@@ -187,5 +188,6 @@ All reports must be in **English**.
 | v10.0 | `service-monitor.ps1` vs `monitor.ps1` confusion; repair firewall spam |
 | v10.1 | English filenames; real-world testing notes |
 | v10.4 | All v10.2–v10.3 review items addressed; design doc in `install.ps1` header |
+| v10.5 | AbandonedMutexException-safe mutex waits (monitor respawn after kill) |
 
 See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases) for full notes per version.

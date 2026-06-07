@@ -89,6 +89,7 @@ $releases = @{
     "v10.0" = @{ name = "v10.0 - Production-hardened kill switch" }
     "v10.1" = @{ name = "v10.1 - English script names + docs" }
     "v10.4" = @{ name = "v10.4 - Production-hardened (code review response)" }
+    "v10.5" = @{ name = "v10.5 - AbandonedMutexException fix" }
 }
 
 function Get-ReleaseBody($tag) {
@@ -127,7 +128,7 @@ function Publish-Release($tag, $name, $body) {
 }
 
 Write-Host "=== Publish GitHub Releases ===" -ForegroundColor Cyan
-$toPublish = if ($Only) { @($Only) } else { @("v10.0", "v10.1", "v10.4") }
+$toPublish = if ($Only) { @($Only) } else { @("v10.0", "v10.1", "v10.4", "v10.5") }
 
 foreach ($tag in $toPublish) {
     if (-not $releases.ContainsKey($tag)) {
