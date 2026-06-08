@@ -7,7 +7,7 @@
 ![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
 ![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
 
-> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Boot-safe (v15.2). Strong privacy (v15).**
+> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Boot-safe (v15.2.1). Strong privacy (v15).**
 
 Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1+).
 
@@ -17,11 +17,11 @@ Automatically installs WireGuard on Windows with a hardened kill switch and **v1
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.2](docs/releases/v15.2.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.2.1](docs/releases/v15.2.1.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
 
 **Internet stuck?** Run **`emergency-reset.bat`** as Administrator (repo root or `C:\WireGuard\`) — removes `KS-*` rules, resets firewall/IP stack, re-enables physical adapters. Then wait 1–5 minutes for `WG-InternetWatchdog`, or re-run `install.ps1`.
 
-**First install on a real PC?** Test in a **VM** first: `.\install.ps1 -DryRun` (no network changes), then full VM install + reboot before physical hardware.
+**First install on a real PC?** Test in a **VM** first: `.\install.ps1 -DryRun` (no firewall/NIC/registry-lock changes), then full VM install + reboot before physical hardware.
 
 **CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse `install.ps1` + `lib/*.ps1` + scripts, **164+ offline assertions** (×3 in `run-all-tests.ps1`), mutex tests (no WireGuard/admin required).
 
@@ -169,13 +169,13 @@ This project separates **leak protection** (always-on with `.\install.ps1`) from
 #    OR open an elevated PowerShell and run:
 
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1 -DryRun   # optional: simulate first (no firewall/NIC changes)
+.\install.ps1 -DryRun   # optional: simulate network hardening first (no firewall/NIC/registry lock)
 .\install.ps1
 ```
 
 | Switch | Description |
 |--------|-------------|
-| `-DryRun` | Log what would happen; **no** firewall rules or adapter binding changes |
+| `-DryRun` | Log network-hardening steps; **no** `netsh` firewall changes, adapter binding changes, or global IPv6 registry lock. Downloads, `C:\WireGuard\` scripts, tasks, and GPO may still run. |
 | `-EnableFailsafe` | Default `$true` — on install fatal error, fail-open instead of bricking |
 | `-NoPause` | Skip `pause` at end (automation/CI) |
 
@@ -370,13 +370,18 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v15.2 (production — current)
+### v15.2.1 (production — current)
+- **`-DryRun` completeness** — all firewall policy, IPv6 rules, and registry lock steps route through `Invoke-SafeNetsh` / `Invoke-SafeRegistrySet` (no hidden network changes during simulation)
+- **Docs aligned** — README and CODE_REVIEW describe what DryRun does and does not simulate
+- See **[docs/releases/v15.2.1.md](docs/releases/v15.2.1.md)**
+
+### v15.2
 - **Boot-safe window (90s)** — no catch-all firewall block during early boot; fixes v15.1 reboot deadlock
 - **DHCP/gateway exemptions** — UDP 67/68 + gateway subnet written before `KS-Block-*`
 - **Physical NIC shield** — IPv6 binding disable only on WireGuard/wintun/AllDebrid virtual adapters
 - **`emergency-reset.bat`** — one-click admin recovery (firewall reset + re-enable physical NICs)
-- **`-DryRun`** and **`$EnableFailsafe`** — simulation mode + automatic fail-open on fatal errors
-- **`lib/Install-SafeNetwork.ps1`** + runtime `wg-safety.ps1`
+- **`-DryRun`** and **`$EnableFailsafe`** — full network-hardening simulation (`Invoke-SafeNetsh` / `Invoke-SafeRegistrySet`); automatic fail-open on fatal errors
+- **`lib/Install-SafeNetwork.ps1`** (9th module) + runtime `wg-safety.ps1`
 - See **[docs/releases/v15.2.md](docs/releases/v15.2.md)** (includes post-mortem)
 
 ### v15.1

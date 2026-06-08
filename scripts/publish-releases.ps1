@@ -83,6 +83,7 @@ $releases = @{
     "v15.0" = @{ name = "v15.0 - Strong Privacy Stack (DNS lock, network hardening, leak-sentinel v15)" }
     "v15.1" = @{ name = "v15.1 - Quality 95+ (lib modules, WARP-first docs, one-step Tor)" }
     "v15.2" = @{ name = "v15.2 - Boot-safety emergency fix (90s window, DHCP exempt, emergency-reset)" }
+    "v15.2.1" = @{ name = "v15.2.1 - DryRun completeness fix (safe install preview)" }
 }
 
 function Get-ReleaseBody($tag) {

@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.1)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
@@ -71,8 +71,9 @@ if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 if ($DryRun) {
-    Write-Host "`n [DRY-RUN] Active - no firewall rules or adapter bindings will be changed." -ForegroundColor Yellow
-    Write-Host "           Simulation logs only. Re-run without -DryRun to apply." -ForegroundColor Gray
+    Write-Host "`n [DRY-RUN] Active - no firewall rules, firewall policy, adapter bindings, or IPv6 registry lock." -ForegroundColor Yellow
+    Write-Host "           Network-hardening steps are logged only. Downloads, scripts, tasks may still run." -ForegroundColor Gray
+    Write-Host "           Re-run without -DryRun to apply network changes." -ForegroundColor Gray
 }
 
 if (Invoke-InstallUpgradeEarlyExit) { exit 0 }

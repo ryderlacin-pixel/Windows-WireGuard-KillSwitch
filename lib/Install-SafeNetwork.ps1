@@ -72,6 +72,23 @@ function Invoke-SafeNetsh {
     Invoke-Expression $Command | Out-Null
 }
 
+function Invoke-SafeRegistrySet {
+    param(
+        [Parameter(Mandatory)][hashtable]$Params,
+        [string]$Reason = ''
+    )
+    $detail = if ($Reason) { " ($Reason)" } else { '' }
+    if ($script:InstallDryRun) {
+        $path = [string]$Params.Path
+        $name = [string]$Params.Name
+        $val  = $Params.Value
+        $typ  = if ($Params.Type) { [string]$Params.Type } else { 'default' }
+        Write-SafeActionLog "Would set registry ${path}\${name} = $val (type $typ)$detail"
+        return
+    }
+    Set-ItemProperty @Params
+}
+
 function Get-LocalGatewaySubnets {
     $list = [System.Collections.Generic.List[string]]::new()
     foreach ($cidr in @('192.168.0.0/16', '10.0.0.0/8', '172.16.0.0/12')) {

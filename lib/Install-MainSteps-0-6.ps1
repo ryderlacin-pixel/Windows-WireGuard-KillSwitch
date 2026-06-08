@@ -234,9 +234,11 @@ $allRules = @(
     "KS - WARP Sunucu Cikis","KS - Loopback Cikis","KS - Loopback Giris",
     "KS - DNS Izin","KS - DNS Engel","KS - WireGuard EXE","KS - WireGuard Tunnel SVC"
 )
-foreach ($k in $allRules) { netsh advfirewall firewall delete rule name="$k" | Out-Null }
+foreach ($k in $allRules) {
+    Invoke-SafeNetsh "netsh advfirewall firewall delete rule name=`"$k`"" 'cleanup old rule'
+}
 
-netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
+Invoke-SafeNetsh 'netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound' 'reset firewall policy'
 # Keep tunnel alive during upgrade — reinstall only in STEP 5 if down
 Remove-Item "$INSTALL_DIR\repair.lock"        -Force -EA SilentlyContinue
 Remove-Item "$INSTALL_DIR\onarim.lock"        -Force -EA SilentlyContinue
@@ -250,11 +252,11 @@ OK "Cleanup done"
 # ================================================================
 Write-Step "STEP 4 - IPv6 BLOCK"
 # ================================================================
-netsh advfirewall firewall delete rule name="KS-Block-IPv6-Out" 2>$null | Out-Null
-netsh advfirewall firewall delete rule name="KS-Block-IPv6-In"  2>$null | Out-Null
+Invoke-SafeNetsh 'netsh advfirewall firewall delete rule name="KS-Block-IPv6-Out"' 'IPv6 block cleanup'
+Invoke-SafeNetsh 'netsh advfirewall firewall delete rule name="KS-Block-IPv6-In"' 'IPv6 block cleanup'
 foreach ($pfx in @('fe80::/10','::1/128','fc00::/7')) {
-    netsh advfirewall firewall add rule name="KS-Block-IPv6-Out" dir=out action=block remoteip=$pfx enable=yes 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-IPv6-In"  dir=in  action=block remoteip=$pfx enable=yes 2>$null | Out-Null
+    Invoke-SafeNetsh "netsh advfirewall firewall add rule name=`"KS-Block-IPv6-Out`" dir=out action=block remoteip=$pfx enable=yes" 'IPv6 block out'
+    Invoke-SafeNetsh "netsh advfirewall firewall add rule name=`"KS-Block-IPv6-In`" dir=in action=block remoteip=$pfx enable=yes" 'IPv6 block in'
 }
 Write-Info "Disabling IPv6 on tunnel adapters only (physical NICs protected)..."
 Disable-TunnelIPv6BindingsOnly
@@ -267,7 +269,7 @@ $ipv6RegParams = @{
     Force       = $true
     ErrorAction = "SilentlyContinue"
 }
-Set-ItemProperty @ipv6RegParams
+Invoke-SafeRegistrySet @ipv6RegParams 'global IPv6 DisabledComponents'
 OK "IPv6 blocked"
 
 # ================================================================
@@ -282,7 +284,7 @@ Write-Step "STEP 6 - FIREWALL RULES"
 # ================================================================
 # Server IPs pre-cached in STEP 2b (no network call during install body)
 
-netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
+Invoke-SafeNetsh 'netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound' 'firewall policy'
 Write-Info "Applying DHCP/gateway/LAN exemptions BEFORE catch-all blocks..."
 Add-KillSwitchFirewallExemptions -ServerIPs $serverIPs -ServerPort $serverPort
 Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-Loopback-Out" dir=out action=allow remoteip=127.0.0.0/8 enable=yes' 'loopback out'

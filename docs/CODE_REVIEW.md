@@ -2,7 +2,7 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v15.2](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.2)
+**Current release:** [v15.2.1](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.2.1)
 
 This document answers reviewer questions from v10.2–v10.4 and summarizes v11–v15 production changes. **v15.2** adds boot-safety in [`lib/Install-SafeNetwork.ps1`](../lib/Install-SafeNetwork.ps1) after a confirmed v15.1 reboot deadlock on real hardware. [`install.ps1`](../install.ps1) remains the single entry point.
 
@@ -14,11 +14,11 @@ This document answers reviewer questions from v10.2–v10.4 and summarizes v11�
 2. Skim **lib module map** below, then recovery layers in [README.md](../README.md#architecture).
 3. Compare concerns against the **Review response table** (v10) and **Version history** (v11–v15).
 4. Offline gate: `.\scripts\test-suite.ps1` (186+ assertions). Live (optional): `.\scripts\live-smoke-test.ps1`.
-5. **VM first:** `.\install.ps1 -DryRun` (no network changes), then full VM install + reboot before physical hardware.
+5. **VM first:** `.\install.ps1 -DryRun` (no firewall/NIC/registry-lock changes), then full VM install + reboot before physical hardware.
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1 -DryRun    # simulation only
+.\install.ps1 -DryRun    # network-hardening simulation only
 .\install.ps1              # real install (VM first)
 ```
 

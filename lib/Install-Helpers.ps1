@@ -213,7 +213,11 @@ function Clear-InstallLock {
 
 function Remove-InstallBlocks {
     foreach ($r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
-        netsh advfirewall firewall delete rule name="$r" 2>$null | Out-Null
+        if (Get-Command Invoke-SafeNetsh -ErrorAction SilentlyContinue) {
+            Invoke-SafeNetsh "netsh advfirewall firewall delete rule name=`"$r`"" 'remove install block'
+        } elseif (-not $script:InstallDryRun) {
+            netsh advfirewall firewall delete rule name="$r" 2>$null | Out-Null
+        }
     }
 }
 
