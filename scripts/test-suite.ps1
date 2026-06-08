@@ -1,6 +1,12 @@
 # Comprehensive offline test suite — target quality 9.5/10 (v11.2)
+#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+
+function Get-ChildPowerShellExe {
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) { return (Get-Command pwsh).Source }
+    return (Get-Command powershell.exe).Source
+}
 $installPath = Join-Path $repoRoot 'install.ps1'
 $failures = [System.Collections.Generic.List[string]]::new()
 $passed = 0
@@ -126,7 +132,10 @@ $mA = New-Object Threading.Mutex($true,$dup)
 $probe = "param(`$n)`$m=New-Object Threading.Mutex(`$false,`$n);`$ok=`$false;try{`$ok=`$m.WaitOne(0)}catch [Threading.AbandonedMutexException]{`$ok=`$true};if(`$m){try{if(`$ok){`$m.ReleaseMutex()}}catch{};`$m.Dispose()};if(`$ok){exit 2}else{exit 0}"
 $pp = Join-Path $env:TEMP 'wg-probe-suite.ps1'
 Set-Content $pp "param(`$n)`n$probe" -Encoding UTF8
-$p = Start-Process powershell.exe -Args "-NoProfile -ExecutionPolicy Bypass -File `"$pp`" -n `"$dup`"" -PassThru -Wait -WindowStyle Hidden
+$shell = Get-ChildPowerShellExe
+$p = Start-Process -FilePath $shell -ArgumentList @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $pp, '-n', $dup
+) -PassThru -Wait -WindowStyle Hidden
 Assert-True ($p.ExitCode -eq 0) "Cross-process mutex (exit=$($p.ExitCode))"
 Remove-Item $pp -Force -ErrorAction SilentlyContinue
 try{$mA.ReleaseMutex()}catch{}; $mA.Dispose()

@@ -1,4 +1,5 @@
-$root = Split-Path $PSScriptRoot -Parent
+#Requires -Version 5.1
+$ErrorActionPreference = 'Stop'
 $fail = 0
 foreach ($i in 1..3) {
     Write-Host "--- test-suite run $i ---" -ForegroundColor Cyan

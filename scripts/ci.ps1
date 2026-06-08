@@ -2,8 +2,14 @@
 # CI entry point — offline quality gate (no admin, no WireGuard, no network required)
 # Used by GitHub Actions and local pre-push verification.
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $fail = 0
+
+trap {
+    Write-Host "CI aborted: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
 
 function Write-Step([string]$msg) {
     Write-Host "`n>> $msg" -ForegroundColor Cyan
