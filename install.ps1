@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.0)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.1)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v13.1: repair/GPO/SVC never Enable-Block (monitor-only block authority); startup fail-open;
+#   recovery loop never re-blocks; resume sets BootGrace; tunnel+adapter dual check.
 # - v13.0 ultimate fail-open: SafeToOpen = tunnel+TCP only (DNS never gates open); BootGrace 180s;
 #   block only after 5x tunnel-down or 15x zombie; repair fail-open on zombie; watchdog graduated;
 #   auto kurtar2 never turns firewall off; unified health across all layers.
@@ -63,7 +65,7 @@ param(
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '13.0'
+$WG_KS_VERSION = '13.1'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -190,12 +192,28 @@ function Remove-TaskFully($name) {
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -EA SilentlyContinue
 }
 
+function Test-TunnelAdapterUp {
+    for ($try = 0; $try -lt 3; $try++) {
+        try {
+            foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
+                if ($a.Status -ne 'Up') { continue }
+                if ($a.Name -eq $TUNNEL_NAME -or $a.InterfaceDescription -match 'WireGuard') { return $true }
+            }
+        } catch {}
+        if ($try -lt 2) { Start-Sleep -Milliseconds 500 }
+    }
+    return $false
+}
+
 function Test-TunnelRunning {
+    $svcUp = $false
     try {
         $svc = Get-Service -Name $TUNNEL_SVC -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -eq 'Running') { return $true }
+        if ($svc -and $svc.Status -eq 'Running') { $svcUp = $true }
     } catch {}
-    return [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING")
+    if (-not $svcUp) { $svcUp = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING") }
+    if (-not $svcUp) { return $false }
+    return (Test-TunnelAdapterUp)
 }
 
 function Test-IsMainMonitor([string]$CommandLine) {
@@ -518,6 +536,8 @@ if (-not `$FromAuto) {
 `$REPAIR = '$REPAIR_PS1'
 Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [RESUME] Unbrick cooldown ending" -Encoding UTF8 -EA SilentlyContinue
 Remove-ItemProperty `$REG_KEY 'UnbrickUntil' -EA SilentlyContinue
+Set-ItemProperty `$REG_KEY 'BootGraceUntil' (Get-Date).AddSeconds(180).ToString('o') -Force
+Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [RESUME] BootGrace 180s set (fail-open)" -Encoding UTF8 -EA SilentlyContinue
 netsh advfirewall set allprofiles state on 2>`$null | Out-Null
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 foreach (`$tn in @('WG-KillSwitch','WG-RepairTask','WG-InternetWatchdog','WG-RebootVerify')) {
@@ -1051,12 +1071,28 @@ function Log([string]`$m) {
     } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
 
+function Test-TunnelAdapterUp {
+    for (`$try = 0; `$try -lt 3; `$try++) {
+        try {
+            foreach (`$a in (Get-NetAdapter -EA SilentlyContinue)) {
+                if (`$a.Status -ne 'Up') { continue }
+                if (`$a.Name -eq `$TUNNEL_NAME -or `$a.InterfaceDescription -match 'WireGuard') { return `$true }
+            }
+        } catch {}
+        if (`$try -lt 2) { Start-Sleep -Milliseconds 500 }
+    }
+    return `$false
+}
+
 function Test-TunnelRunning {
+    `$svcUp = `$false
     try {
         `$svc = Get-Service -Name `$TUNNEL_SVC -ErrorAction SilentlyContinue
-        if (`$svc -and `$svc.Status -eq 'Running') { return `$true }
+        if (`$svc -and `$svc.Status -eq 'Running') { `$svcUp = `$true }
     } catch {}
-    return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match "RUNNING"))
+    if (-not `$svcUp) { `$svcUp = [bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match "RUNNING") }
+    if (-not `$svcUp) { return `$false }
+    return (Test-TunnelAdapterUp)
 }
 
 function Test-TcpHost([string]`$HostName, [int]`$Port, [int]`$TimeoutMs = 4000) {
@@ -1340,16 +1376,16 @@ if (Test-SafeToOpen -or Test-BootGrace -or Test-UnbrickActive) {
     if (Test-SafeToOpen) { Log "Startup: healthy (waited `${bootWait}s), internet open" }
     else { Log "Startup: fail-open hold (boot-grace/unbrick), internet open" }
 } else {
-    `$state = 'blocked'
-    Enable-Block
+    `$state = 'open'
+    Disable-Block
     if (Test-TunnelRunning) {
-        Log "Startup: zombie tunnel (waited `${bootWait}s), block active - starting recovery"
+        Log "Startup: zombie tunnel suspected (waited `${bootWait}s) - fail-open until debounce"
     } else {
-        Log "Startup: tunnel down (waited `${bootWait}s), block active - starting recovery"
+        Log "Startup: tunnel down (waited `${bootWait}s) - fail-open until debounce"
     }
 }
 
-`$startupRecovery = (`$state -eq 'blocked')
+`$startupRecovery = `$false
 `$wasOpen = (`$state -eq 'open')
 `$script:dedupeTick = 0
 `$script:tamperTick = 0
@@ -1460,8 +1496,7 @@ while (`$true) {
                     Clear-DnsClientCache -EA SilentlyContinue
                     Disable-Block; `$state = 'open'; `$success = `$true; break
                 } else {
-                    Log "Attempt `$i - tunnel up but no internet after 30s, DNS flush + wait"
-                    Enable-Block; `$state = 'blocked'
+                    Log "Attempt `$i - tunnel up but no internet after 30s, DNS flush + wait (no re-block)"
                     Clear-DnsClientCache -EA SilentlyContinue
                     Start-Sleep -Seconds 10
                 }
@@ -1471,7 +1506,7 @@ while (`$true) {
             }
         }
         if (-not `$success) {
-            Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - holding block 60s then retrying"
+            Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - holding 60s then retrying (no re-block)"
             if (`$totalAttempts -ge 5 -and (`$totalAttempts % 5) -eq 0) {
                 if (Invoke-EmergencyUnbrick) {
                     `$state = 'open'; `$wasOpen = `$true; `$success = `$true; break
@@ -1479,11 +1514,9 @@ while (`$true) {
             } elseif (`$totalAttempts -ge 15 -and (`$totalAttempts % 15) -eq 0) {
                 Log "STUCK: run C:\WireGuard\kurtar.bat for emergency restore"
             }
-            Enable-Block; `$state = 'blocked'
             `$waited = 0
             while (`$waited -lt 60) {
                 Start-Sleep -Seconds 3; `$waited += 3
-                if (-not (Test-TunnelRunning)) { Enable-Block; `$state = 'blocked' }
                 if (Test-SafeToOpen) {
                     Log "Healthy during 60s hold (tunnel + internet verified)"
                     Clear-DnsClientCache -EA SilentlyContinue
@@ -1552,12 +1585,28 @@ function Log($m) {
     } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
 }
 
+function Test-TunnelAdapterUp {
+    for ($try = 0; $try -lt 3; $try++) {
+        try {
+            foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
+                if ($a.Status -ne 'Up') { continue }
+                if ($a.Name -eq $TUNNEL_NAME -or $a.InterfaceDescription -match 'WireGuard') { return $true }
+            }
+        } catch {}
+        if ($try -lt 2) { Start-Sleep -Milliseconds 500 }
+    }
+    return $false
+}
+
 function Test-TunnelRunning {
+    $svcUp = $false
     try {
         $svc = Get-Service -Name $TUNNEL_SVC -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -eq 'Running') { return $true }
+        if ($svc -and $svc.Status -eq 'Running') { $svcUp = $true }
     } catch {}
-    return ([bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING"))
+    if (-not $svcUp) { $svcUp = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING") }
+    if (-not $svcUp) { return $false }
+    return (Test-TunnelAdapterUp)
 }
 
 function Test-TcpHost([string]$HostName, [int]$Port, [int]$TimeoutMs = 4000) {
@@ -1720,22 +1769,6 @@ function Get-RepairServerIP {
     return '162.159.192.0/24,104.16.0.0/13'
 }
 
-function Enable-Block {
-    if (-not (Test-BlockAllowed)) { return }
-    $serverIp = Get-RepairServerIP
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          2>$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out"     dir=out action=block interfacetype=lan         remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-RemoteAccess-Out" dir=out action=block interfacetype=remoteaccess remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-PPP-Out"          dir=out action=block interfacetype=ppp          remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIp remoteport=$SERVER_PORT enable=yes | Out-Null
-    Enable-DnsLeakProtection
-}
-
 function Disable-Block {
     netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
     netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
@@ -1747,18 +1780,16 @@ function Disable-Block {
 function Sync-KillSwitchState {
     if (-not (Test-BlockAllowed)) {
         Disable-Block
+        Disable-DnsLeakProtection
         Log "Sync: fail-open hold - internet open"
         return
     }
     if (Test-SafeToOpen) {
         Disable-Block
+        Disable-DnsLeakProtection
         Log "Sync: healthy - internet open"
-    } elseif (-not (Test-TunnelRunning)) {
-        Enable-Block
-        Log "Sync: tunnel down - block active"
     } else {
-        Disable-Block
-        Log "Sync: zombie tunnel - deferring block to monitor (fail-open)"
+        Log "Sync: unhealthy - monitor-only block authority (repair will not block)"
     }
 }
 
@@ -1994,8 +2025,21 @@ function Test-Internet {
     }
     return (`$hits -ge 2)
 }
+function Test-TunnelAdapterUp {
+    for (`$try = 0; `$try -lt 3; `$try++) {
+        try {
+            foreach (`$a in (Get-NetAdapter -EA SilentlyContinue)) {
+                if (`$a.Status -ne 'Up') { continue }
+                if (`$a.InterfaceDescription -match 'WireGuard') { return `$true }
+            }
+        } catch {}
+        if (`$try -lt 2) { Start-Sleep -Milliseconds 500 }
+    }
+    return `$false
+}
 function Test-TunnelRunning {
-    return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING'))
+    if (-not ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING'))) { return `$false }
+    return (Test-TunnelAdapterUp)
 }
 function Test-BlockRulePresent {
     `$o = netsh advfirewall firewall show rule name="KS-Block-WiFi-Out" 2>`$null | Out-String
@@ -2120,11 +2164,12 @@ OK "wmi-repair.ps1 written"
 # ================================================================
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
-@'
-# WGKillSwitchSvc wrapper v12.0 (auto-generated by install.ps1)
+$svcKsVersion = $WG_KS_VERSION
+"# WGKillSwitchSvc wrapper v$svcKsVersion (auto-generated by install.ps1)`r`n" + @'
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
+$REG_KEY   = 'HKLM:\SOFTWARE\WGKillSwitch'
 '@ + "`r`n" + "`$TUNNEL_SVC = '$TUNNEL_SVC'`r`n" + @'
 function Wait-NamedMutex([System.Threading.Mutex]$Mutex, [int]$TimeoutMs) {
     try { return $Mutex.WaitOne($TimeoutMs) }
@@ -2161,6 +2206,14 @@ function RepairCooldownActive {
         return ((Get-Date) -lt $t.AddMinutes(2))
     } catch { return $false }
 }
+function Test-HoldActive {
+    try {
+        $reg = Get-ItemProperty $REG_KEY -EA SilentlyContinue
+        if ($reg.UnbrickUntil -and (Get-Date) -lt [datetime]$reg.UnbrickUntil) { return $true }
+        if ($reg.BootGraceUntil -and (Get-Date) -lt [datetime]$reg.BootGraceUntil) { return $true }
+    } catch {}
+    return $false
+}
 function Get-PreferredShell {
     $pwshPath = "${env:ProgramFiles}\PowerShell\7\pwsh.exe"
     if (Test-Path $pwshPath) { return $pwshPath }
@@ -2179,10 +2232,15 @@ function TriggerRepair([string]$reason) {
     Log $reason
     if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 }
-Log "WGKillSwitchSvc started (v12.0)"
+'@ + "`r`nLog `"WGKillSwitchSvc started (v$svcKsVersion)`"`r`n" + @'
 Start-Sleep -Seconds 15
-TriggerRepair "Initial repair triggered"
+if (-not (Test-HoldActive)) { TriggerRepair "Initial repair triggered" }
+else { Log "Fail-open hold at startup - repair deferred" }
 while ($true) {
+    if (Test-HoldActive) {
+        Start-Sleep -Seconds 60
+        continue
+    }
     $proc = GetMonitorShellProcs
     $tunnelDown = (( & sc.exe query $TUNNEL_SVC 2>$null) -notmatch 'RUNNING')
     if ($tunnelDown -and $proc) {
@@ -2707,11 +2765,15 @@ Write-Step "STEP 17 - GPO BOOT SCRIPT"
 # ================================================================
 New-Item -ItemType Directory -Path $GPO_SCRIPT_DIR -Force -EA SilentlyContinue | Out-Null
 $gpoTunnelSvc = $TUNNEL_SVC
+$gpoKsVersion = $WG_KS_VERSION
+$gpoTunnelName = $TUNNEL_NAME
 $gpoContent = @"
-# WG KillSwitch GPO Boot Script v12.0 (auto-generated by install.ps1)
+# WG KillSwitch GPO Boot Script v$gpoKsVersion (auto-generated by install.ps1)
 `$LOG        = 'C:\WireGuard\killswitch.log'
 `$REPAIR     = 'C:\WireGuard\repair.ps1'
 `$TUNNEL_SVC = '$gpoTunnelSvc'
+`$TUNNEL_NAME = '$gpoTunnelName'
+`$REG_KEY    = 'HKLM:\SOFTWARE\WGKillSwitch'
 `$ErrorActionPreference = 'SilentlyContinue'
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
@@ -2725,8 +2787,35 @@ function Log(`$m) {
         Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [GPO] `$m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
 }
+function Test-BootGrace {
+    try {
+        `$reg = Get-ItemProperty `$REG_KEY -Name BootGraceUntil -EA SilentlyContinue
+        if (`$reg.BootGraceUntil -and (Get-Date) -lt [datetime]`$reg.BootGraceUntil) { return `$true }
+    } catch {}
+    return `$false
+}
+function Test-UnbrickActive {
+    try {
+        `$reg = Get-ItemProperty `$REG_KEY -Name UnbrickUntil -EA SilentlyContinue
+        if (`$reg.UnbrickUntil -and (Get-Date) -lt [datetime]`$reg.UnbrickUntil) { return `$true }
+    } catch {}
+    return `$false
+}
+function Test-TunnelAdapterUp {
+    for (`$try = 0; `$try -lt 3; `$try++) {
+        try {
+            foreach (`$a in (Get-NetAdapter -EA SilentlyContinue)) {
+                if (`$a.Status -ne 'Up') { continue }
+                if (`$a.Name -eq `$TUNNEL_NAME -or `$a.InterfaceDescription -match 'WireGuard') { return `$true }
+            }
+        } catch {}
+        if (`$try -lt 2) { Start-Sleep -Milliseconds 500 }
+    }
+    return `$false
+}
 function Test-TunnelRunning {
-    return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match "RUNNING"))
+    if (-not ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match "RUNNING"))) { return `$false }
+    return (Test-TunnelAdapterUp)
 }
 function Test-TcpHost([string]`$HostName, [int]`$Port, [int]`$TimeoutMs = 4000) {
     `$tcp = `$null
@@ -2756,19 +2845,32 @@ function Start-HiddenScript([string]`$ScriptPath) {
     `$shell = Get-PreferredShell
     Start-Process -FilePath `$shell -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$ScriptPath) -WindowStyle Hidden
 }
-Log "GPO boot script fired (v12.0)"
+Log "GPO boot script fired (v$gpoKsVersion)"
+try {
+    `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
+    `$graceEnd = `$bootTime.AddSeconds(180)
+    if ((Get-Date) -lt `$graceEnd) {
+        New-Item -Path `$REG_KEY -Force | Out-Null
+        Set-ItemProperty `$REG_KEY 'BootGraceUntil' `$graceEnd.ToString('o') -Force
+        Log "GPO: BootGrace until `$(`$graceEnd.ToString('HH:mm:ss')) (fail-open)"
+    }
+} catch {}
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 & sc.exe config `$TUNNEL_SVC start= delayed-auto 2>`$null | Out-Null
-`$waited = 0
-while (`$waited -lt 120 -and -not (Test-SafeToOpen)) {
-    Start-Sleep -Seconds 3; `$waited += 3
+if (Test-UnbrickActive -or Test-BootGrace) {
+    Log "GPO: fail-open hold - repair only (no block authority)"
+} else {
+    `$waited = 0
+    while (`$waited -lt 120 -and -not (Test-SafeToOpen)) {
+        Start-Sleep -Seconds 3; `$waited += 3
+    }
+    if (Test-SafeToOpen) { Log "GPO: healthy after `${waited}s (tunnel + internet)" }
+    elseif (Test-TunnelRunning) { Log "GPO: zombie tunnel after `${waited}s - monitor will debounce" }
+    else { Log "GPO: tunnel down after `${waited}s - monitor will debounce" }
 }
-if (Test-SafeToOpen) { Log "GPO: healthy after `${waited}s (tunnel + internet)" }
-elseif (Test-TunnelRunning) { Log "GPO: zombie tunnel after `${waited}s - repair will sync block" }
-else { Log "GPO: tunnel down after `${waited}s - repair will sync block" }
 if (Test-Path `$REPAIR) {
     Start-HiddenScript `$REPAIR
-    Log "Repair triggered (waited `${waited}s)"
+    Log "Repair triggered (GPO never blocks)"
 }
 "@
 $gpoContent | Set-Content $GPO_SCRIPT -Encoding UTF8 -Force

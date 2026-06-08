@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v13.0 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v13.1 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -11,12 +11,28 @@ function Assert([bool]$cond, [string]$name) {
     else { $failures.Add($name); Write-Host "  [FAIL] $name" -ForegroundColor Red }
 }
 
+function Test-TunnelAdapterUp {
+    $tunnelReg = Get-ItemProperty $REG -Name TunnelName -EA SilentlyContinue
+    $tn = if ($tunnelReg -and $tunnelReg.TunnelName) { $tunnelReg.TunnelName } else { 'wgcf-profile' }
+    for ($try = 0; $try -lt 3; $try++) {
+        try {
+            foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
+                if ($a.Status -ne 'Up') { continue }
+                if ($a.Name -eq $tn -or $a.InterfaceDescription -match 'WireGuard') { return $true }
+            }
+        } catch {}
+        if ($try -lt 2) { Start-Sleep -Milliseconds 500 }
+    }
+    return $false
+}
+
 function Test-TunnelRunning {
     try {
-        $reg = Get-ItemProperty $REG -Name TunnelName -EA SilentlyContinue
-        if ($reg.TunnelName) { $script:TUNNEL_SVC = "WireGuardTunnel`$$($reg.TunnelName)" }
+        $tunnelReg = Get-ItemProperty $REG -Name TunnelName -EA SilentlyContinue
+        if ($tunnelReg.TunnelName) { $script:TUNNEL_SVC = "WireGuardTunnel`$$($tunnelReg.TunnelName)" }
     } catch {}
-    return ([bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match 'RUNNING'))
+    if (-not ([bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match 'RUNNING'))) { return $false }
+    return (Test-TunnelAdapterUp)
 }
 
 function Test-Tcp443([string]$h) {
@@ -36,7 +52,13 @@ function Test-Internet {
     return ($hits -ge 2)
 }
 
-function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
+function Test-SafeToOpen {
+    for ($try = 0; $try -lt 3; $try++) {
+        if ((Test-TunnelRunning) -and (Test-Internet)) { return $true }
+        if ($try -lt 2) { Start-Sleep -Seconds 1 }
+    }
+    return $false
+}
 
 function Get-MonitorCount {
     $n = 0
@@ -52,7 +74,7 @@ function Get-MonitorCount {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  SAFE LIVE VERIFY (v13.0 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  SAFE LIVE VERIFY (v13.1 - non-disruptive)" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $healthy = Test-SafeToOpen
@@ -61,8 +83,8 @@ if (-not $healthy) {
     Write-Host "  [WARN] System unhealthy - read-only audits only" -ForegroundColor Yellow
 }
 
-$reg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($reg -and $reg.Version -ge '13.0') "Registry version 13.0+ (got $($reg.Version))"
+$ksReg = Get-ItemProperty $REG -EA SilentlyContinue
+Assert ($ksReg -and $ksReg.Version -ge '13.1') "Registry version 13.1+ (got $($ksReg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat deployed'
@@ -76,23 +98,35 @@ $wmi = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
 $k2 = Get-Content 'C:\WireGuard\kurtar2.ps1' -Raw -EA SilentlyContinue
 $wd = Get-Content 'C:\WireGuard\internet-watchdog.ps1' -Raw -EA SilentlyContinue
+$res = Get-Content 'C:\WireGuard\resume-after-unbrick.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v13\.0') 'monitor.ps1 version v13.0'
+Assert ($mon -match 'v13\.1') 'monitor.ps1 version v13.1'
+Assert ($mon -match 'Test-TunnelAdapterUp') 'monitor dual-check: service + adapter'
 Assert ($mon -match 'Test-BootGrace') 'monitor has BootGrace fail-open'
 Assert ($mon -match 'Test-BlockAllowed') 'monitor has block-allowed guard'
 Assert ($mon -notmatch 'Test-Dns') 'monitor SafeToOpen excludes DNS gate'
+Assert ($mon -match 'fail-open until debounce') 'monitor startup fail-open'
+Assert ($mon -match 'no re-block') 'monitor recovery never re-blocks'
 Assert ($mon -match 'zombieStreak') 'monitor debounces zombie block (15x)'
 Assert ($mon -match 'tunnelLostStreak') 'monitor debounces tunnel-down (5x)'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
-Assert ($rep -match 'v13\.0|Repair Script v13') 'repair.ps1 version v13.0'
-Assert ($rep -match 'deferring block to monitor') 'repair fail-open on zombie'
+Assert ($rep -match 'v13\.1|Repair Script v13') 'repair.ps1 version v13.1'
+Assert ($rep -match 'monitor-only block authority') 'repair never blocks (monitor-only)'
+Assert ($rep -notmatch 'function Enable-Block') 'repair has no Enable-Block function'
 Assert ($rep -match 'Test-BootGrace') 'repair respects BootGrace'
+Assert ($rep -match 'Test-TunnelAdapterUp') 'repair dual-check: service + adapter'
 Assert ($k2 -match 'UnbrickUntil') 'kurtar2 sets UnbrickUntil cooldown'
 Assert ($k2 -match 'Disable-ScheduledTask') 'kurtar2 disables tasks'
 Assert ($k2 -match 'FromAuto') 'kurtar2 supports auto mode'
 Assert ($wd -match 'Invoke-GentleUnbrick') 'watchdog has gentle unbrick'
 Assert ($wd -match 'streak') 'watchdog graduated response'
+Assert ($wd -match 'Test-TunnelAdapterUp') 'watchdog dual-check tunnel'
 Assert (Test-Path 'C:\WireGuard\resume-after-unbrick.ps1') 'resume-after-unbrick.ps1 deployed'
+Assert ($res -match 'BootGraceUntil') 'resume sets BootGrace after unbrick'
+Assert ($svc -match 'Test-HoldActive') 'service-monitor respects BootGrace/Unbrick'
+Assert ($gpo -match 'v13\.1') 'GPO script version v13.1'
+Assert ($gpo -match 'Test-BootGrace') 'GPO respects BootGrace'
+Assert ($gpo -match 'never blocks') 'GPO has no block authority'
 
 foreach ($tn in @('WG-KillSwitch', 'WG-RepairTask', 'WG-RebootVerify', 'WG-InternetWatchdog')) {
     $t = Get-ScheduledTask -TaskName $tn -EA SilentlyContinue
