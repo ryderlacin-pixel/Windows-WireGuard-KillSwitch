@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'install.ps1'
+      - 'scripts/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'install.ps1'
+      - 'scripts/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Offline quality gate (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Offline CI (parse, compile, patterns, mutex)
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          ./scripts/ci.ps1
+          if ($LASTEXITCODE -ne 0) { throw "ci.ps1 failed with exit code $LASTEXITCODE" }

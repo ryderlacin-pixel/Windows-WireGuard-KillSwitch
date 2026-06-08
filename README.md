@@ -3,6 +3,7 @@
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-5391FE?logo=powershell&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![CI](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
 ![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
 
@@ -15,6 +16,8 @@ Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened ki
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
 **Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v11.2](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v11.2)**.
+
+**CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse, compile, 52 assertions × 3, mutex tests (no WireGuard/admin required).
 
 **Security check (after install):** run `scripts\security-audit.ps1` as Administrator — IP leak, DNS leak, IPv6, kill switch simulation.
 
@@ -265,6 +268,7 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ## Changelog
 
 ### v11.2
+- **GitHub Actions CI:** `.github/workflows/ci.yml` — `scripts/ci.ps1` offline gate on every push/PR
 - **Post-reboot auto-verify:** `WG-RebootVerify` scheduled task runs `post-reboot-verify.ps1` 5 min after boot
 - Runs `post-install-verify.ps1` + `security-audit.ps1`; logs to `C:\WireGuard\reboot-verify.log`
 - Registry: `RebootVerifyLastResult`, `ScriptsPath`, `RebootVerifyPath`
