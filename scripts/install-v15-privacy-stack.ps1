@@ -445,8 +445,8 @@ function Test-ScriptIntegrityVaultV15 {
         $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
         $expected = $reg.$($pair.Key)
         if ([string]::IsNullOrWhiteSpace($expected)) { return $false }
-        $actual = (Get-FileHash -Path $pair.File -Algorithm SHA256).Hash
-        if ($actual -ne $expected) { return $false }
+        $actual = if (Get-Command Get-ScriptSha256 -EA SilentlyContinue) { Get-ScriptSha256 $pair.File } else { (Get-FileHash -LiteralPath $pair.File -Algorithm SHA256).Hash }
+        if (-not $actual -or $actual -ne $expected) { return $false }
     }
     return $true
 }

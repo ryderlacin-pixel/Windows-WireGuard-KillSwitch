@@ -89,6 +89,8 @@ $releases = @{
     "v15.2.4" = @{ name = "v15.2.4 - Install internet protection (defer DNS lock until dnscrypt healthy)" }
     "v15.2.6" = @{ name = "v15.2.6 - Code review critical fixes (mutex, GPO regex, ScriptsPath, admin order)" }
     "v15.2.7" = @{ name = "v15.2.7 - Post-install internet protection (grace period, DNS lock gate, tunnel config backup)" }
+    "v15.2.8" = @{ name = "v15.2.8 - Safe emergency-reset, fail-open DHCP DNS, stable DNS lock gate" }
+    "v15.2.9" = @{ name = "v15.2.9 - Install final-check fixes (repair dual trigger, registry backup, integrity vault)" }
 }
 
 function Get-ReleaseBody($tag) {

@@ -140,6 +140,77 @@ function Remove-TaskFully($name) {
     Invoke-Schtasks @('/Delete', '/TN', $tn, '/F')
 }
 
+function Register-RepairTaskDualTrigger([string]$TaskName, [string]$ScriptPath) {
+    Remove-TaskFully $TaskName
+    $start = (Get-Date).ToString('yyyy-MM-dd') + 'T00:00:00'
+    $xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>WG Repair - 30s boot delay + every 2min</Description></RegistrationInfo>
+  <Triggers>
+    <BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger>
+    <TimeTrigger>
+      <Repetition><Interval>PT2M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
+      <StartBoundary>$start</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <Enabled>true</Enabled>
+    <ExecutionTimeLimit>PT15M</ExecutionTimeLimit>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File &quot;$ScriptPath&quot;</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+    $tmp = Join-Path $env:TEMP 'wg-repair-dual.xml'
+    try {
+        [IO.File]::WriteAllText($tmp, $xml, [Text.UnicodeEncoding]::new($false, $true))
+        Register-ScheduledTask -TaskName $TaskName -Xml (Get-Content $tmp -Raw -Encoding Unicode) -Force -EA Stop | Out-Null
+        return $true
+    } catch {
+        $repTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
+        return (Register-TaskViaSchtasks $TaskName $repTr '/SC MINUTE /MO 2')
+    } finally {
+        Remove-Item $tmp -Force -EA SilentlyContinue
+    }
+}
+
+function Refresh-RegistryTaskBackups {
+    if (-not (Test-Path 'HKLM:\SOFTWARE\WGKillSwitch')) {
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+    }
+    $pairs = @(
+        @{ Name = 'TaskXML'; Task = $TASK_MONITOR },
+        @{ Name = 'TaskXMLRepair'; Task = $TASK_REPAIR },
+        @{ Name = 'TaskXMLRebootVerify'; Task = $TASK_REBOOT_VERIFY },
+        @{ Name = 'TaskXMLWatchdog'; Task = $TASK_WATCHDOG }
+    )
+    $ok = 0
+    foreach ($pair in $pairs) {
+        if (-not $pair.Task) { continue }
+        $tx = Export-TaskXmlSafe $pair.Task
+        if ($tx) {
+            $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($tx))
+            Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' $pair.Name $b64 -Force
+            $ok++
+        }
+    }
+    return ($ok -ge 2)
+}
+
 function Register-TaskViaSchtasks(
     [string]$Name,
     [string]$Command,

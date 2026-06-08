@@ -186,8 +186,8 @@ foreach ($tn in @($TASK_MONITOR, $TASK_REPAIR, 'WireGuard-KillSwitch-Monitor', '
 Remove-KurtarArtifacts
 
 Write-Info "Removing old NSSM service (if any)..."
-$oldSvc = & sc.exe query $WG_SVC_NAME 2>$null
-if ($oldSvc) {
+$oldSvc = & sc.exe query $WG_SVC_NAME 2>$null | Out-String
+if ($oldSvc -match 'STATE') {
     if ($oldSvc -match 'PAUSED') { Invoke-ScCommand @('continue', $WG_SVC_NAME) }
     if (Test-Path $NSSM) {
         $np = Start-Process -FilePath $NSSM -ArgumentList 'stop', $WG_SVC_NAME -PassThru -NoNewWindow -Wait:$false

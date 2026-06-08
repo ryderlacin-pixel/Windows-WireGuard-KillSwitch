@@ -17,9 +17,8 @@ Write-Step "STEP 12 - REPAIR TASK (30s boot delay + every 2min)"
 # ================================================================
 # Repair cadence: every 2min; repair.ps1 enforces ExecutionTimeLimit Minutes 15 per run
 Remove-TaskFully $TASK_REPAIR
-$repTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR_PS1`""
-if (Register-TaskViaSchtasks $TASK_REPAIR $repTr '/SC MINUTE /MO 2') {
-    OK "WG-RepairTask registered - every 2min"
+if (Register-RepairTaskDualTrigger $TASK_REPAIR $REPAIR_PS1) {
+    OK "WG-RepairTask registered - 30s boot delay + every 2min"
 } else { Write-Err "WG-RepairTask registration FAILED!" }
 
 # ================================================================

@@ -215,6 +215,12 @@ Log 'Windows privacy reduction applied'
     attrib +S +H $PRIVACY_GUARD_PS1 2>$null | Out-Null
 }
 
+function Get-ScriptSha256([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try { attrib -R -S -H $Path 2>$null | Out-Null } catch {}
+    try { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash } catch { return $null }
+}
+
 function Install-ScriptIntegrityVault {
     if (-not (Test-Path 'HKLM:\SOFTWARE\WGKillSwitch')) {
         New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
@@ -224,11 +230,11 @@ function Install-ScriptIntegrityVault {
         (Join-Path $INSTALL_DIR 'install.ps1')
     )
     foreach ($f in $vaultFiles) {
-        if (-not (Test-Path $f)) { continue }
+        if (-not (Test-Path -LiteralPath $f)) { continue }
         if ((Get-Item -LiteralPath $f -EA SilentlyContinue) -is [System.IO.DirectoryInfo]) { continue }
         $leaf = Split-Path $f -Leaf
-        $hash = (Get-FileHash -Path $f -Algorithm SHA256).Hash
-        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' "Hash_$leaf" $hash -Force
+        $hash = Get-ScriptSha256 $f
+        if ($hash) { Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' "Hash_$leaf" $hash -Force }
     }
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'IntegrityVaultDate' (Get-Date -Format 'o') -Force
     if (Get-Command Extend-ScriptIntegrityVaultV14 -EA SilentlyContinue) {
@@ -263,9 +269,9 @@ function Test-ScriptIntegrityVault {
     )) {
         $expected = $reg.$($pair.Key)
         if ([string]::IsNullOrWhiteSpace($expected)) { return $false }
-        if (-not (Test-Path $pair.File)) { return $false }
-        $actual = (Get-FileHash -Path $pair.File -Algorithm SHA256).Hash
-        if ($actual -ne $expected) { return $false }
+        if (-not (Test-Path -LiteralPath $pair.File)) { return $false }
+        $actual = Get-ScriptSha256 $pair.File
+        if (-not $actual -or $actual -ne $expected) { return $false }
     }
     return $true
 }

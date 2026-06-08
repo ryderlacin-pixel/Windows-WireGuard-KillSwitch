@@ -22,7 +22,7 @@ Write-Step "STEP 18b - PRIVACY HARDENING"
 try { Install-PrivacyHardening } catch { WARN "Privacy hardening failed: $_" }
 if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: deployed" } else { WARN "privacy-hardening-guard.ps1: missing" }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: deployed" } else { WARN "webrtc-leak-guard.ps1: missing" }
-if (Test-ScriptIntegrityVault) { OK "Script integrity vault: seeded" } else { WARN "Script integrity vault: not verified" }
+if (Test-ScriptIntegrityVault) { OK "Script integrity vault: seeded" } else { Write-Info "Script integrity vault: finalizes at STEP 19" }
 
 # ================================================================
 Write-Step "STEP 18c - V14 DNS LEAK STACK (dnscrypt-proxy)"
@@ -89,25 +89,6 @@ Set-BootGraceRegistry -Seconds $script:BOOT_GRACE_SEC
 Set-PostInstallGraceRegistry -Minutes 15
 Clear-InstallLock
 OK "Install lock cleared - $($script:BOOT_GRACE_SEC)s BootGrace + 15min post-install grace (fail-open)"
-if (Test-Path $NSSM) {
-    & $NSSM start $WG_SVC_NAME 2>$null | Out-Null
-    Start-Sleep 3
-    $svcStatus = & sc.exe query $WG_SVC_NAME 2>$null
-    if ($svcStatus -match 'RUNNING') { OK 'WGKillSwitchSvc: RUNNING (delayed-auto)' }
-    else { WARN 'WGKillSwitchSvc: start pending - repair layers still active' }
-}
-Stop-AllMonitorProcs
-Remove-Item "$INSTALL_DIR\monitor.pid" -Force -EA SilentlyContinue
-Write-Info "Monitor start delayed 45s (post-install stability window)..."
-Start-Sleep -Seconds 45
-Start-HiddenScript $MONITOR_PS1
-Start-Sleep 5
-if (-not (Test-SafeToOpen)) {
-    Remove-InstallBlocks
-    WARN "Tunnel not healthy yet - blocks OFF; monitor will recover."
-} else {
-    OK "Tunnel + internet OK - monitor taking over"
-}
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $emerBat = Join-Path $repoRoot 'emergency-reset.bat'
 $emerPs1 = Join-Path $repoRoot 'scripts\emergency-reset.ps1'
@@ -119,10 +100,32 @@ if (Test-Path $emerBat) {
     Copy-Item $emerBat "$INSTALL_DIR\emergency-reset.bat" -Force
     OK "emergency-reset.bat deployed to $INSTALL_DIR"
 }
-
 Write-GuardBackups
 Install-ScriptIntegrityVault
-OK "Guard vault refreshed (final script versions)"
+if (Get-Command Refresh-RegistryTaskBackups -EA SilentlyContinue) {
+    if (Refresh-RegistryTaskBackups) { OK 'Registry task backups refreshed' }
+    else { WARN 'Registry task backups: partial export' }
+}
+OK "Guard vault + integrity vault finalized (before services start)"
+Stop-AllMonitorProcs
+Remove-Item "$INSTALL_DIR\monitor.pid" -Force -EA SilentlyContinue
+if (Test-Path $NSSM) {
+    & $NSSM start $WG_SVC_NAME 2>$null | Out-Null
+    Start-Sleep 3
+    $svcStatus = & sc.exe query $WG_SVC_NAME 2>$null | Out-String
+    if ($svcStatus -match 'RUNNING') { OK 'WGKillSwitchSvc: RUNNING (delayed-auto)' }
+    else { WARN 'WGKillSwitchSvc: start pending - repair layers still active' }
+}
+Write-Info "Monitor start delayed 45s (post-install stability window)..."
+Start-Sleep -Seconds 45
+Start-HiddenScript $MONITOR_PS1
+Start-Sleep 5
+if (-not (Test-SafeToOpen)) {
+    Remove-InstallBlocks
+    WARN "Tunnel not healthy yet - blocks OFF; monitor will recover."
+} else {
+    OK "Tunnel + internet OK - monitor taking over"
+}
 
 # ================================================================
 Write-Step "STEP 20 - FINAL CHECK"
@@ -130,6 +133,8 @@ Write-Step "STEP 20 - FINAL CHECK"
 if (Get-Command Invoke-DeferredPrivacyGuards -EA SilentlyContinue) {
     Invoke-DeferredPrivacyGuards
 }
+Install-ScriptIntegrityVault
+if (Get-Command Refresh-RegistryTaskBackups -EA SilentlyContinue) { Refresh-RegistryTaskBackups | Out-Null }
 $warnings = 0
 if (Test-TunnelRunning) { OK "Tunnel: RUNNING" } else { WARN "Tunnel: DOWN (monitor will recover)"; $warnings++ }
 if (Test-SafeToOpen) {
@@ -163,15 +168,19 @@ if ($gWd -and $gWd.State -in @('Ready','Running')) { OK "WG-InternetWatchdog tas
 else { WARN "WG-InternetWatchdog task missing or disabled"; $warnings++ }
 if (Test-Path $WATCHDOG_PS1) { OK "internet-watchdog.ps1: present" } else { WARN "internet-watchdog.ps1: missing"; $warnings++ }
 
-Start-Sleep 3
-$proc = Get-MonitorShellProcs
+$proc = $null
+for ($monWait = 0; $monWait -lt 12; $monWait++) {
+    $proc = Get-MonitorShellProcs
+    if ($proc) { break }
+    Start-Sleep -Seconds 2
+}
 if (($proc | Measure-Object).Count -gt 1) {
     $proc | Sort-Object Id | Select-Object -SkipLast 1 | ForEach-Object { Stop-Process -Id $_.Id -Force -EA SilentlyContinue }
     Start-Sleep 2
     $proc = Get-MonitorShellProcs
 }
 if ($proc) { OK "Monitor: active (PID: $(($proc | Select-Object -First 1).Id))" }
-else        { WARN "Monitor: not yet running" }
+else        { WARN "Monitor: not yet running (repair task will start it)" }
 
 $svcSt = & sc.exe query $WG_SVC_NAME 2>$null
 if ($svcSt -match "RUNNING")   { OK "WGKillSwitchSvc: RUNNING" }
