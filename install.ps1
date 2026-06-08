@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.4)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.5)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v13.5: privacy engineer pass — Privacy Sandbox/DoH/QUIC off, Firefox RFP+, WER reduced,
+#   honest threat-model scores, script SHA256 integrity vault; supply-chain verify in safe-live-verify.
 # - v13.4: privacy hardening — cookies/tracking/fingerprint + Windows telemetry/ads/cloud;
 #   privacy-hardening-guard.ps1 re-applied by repair/vault (webrtc forwarder kept).
 # - v13.3: system-level WebRTC leak guard — Chromium/Brave/Edge HKLM policies + Firefox
@@ -67,11 +69,13 @@ param(
     [string]$CustomConfig     = "",  # Own .conf file: .\install.ps1 -CustomConfig "C:\myvpn.conf"
     [string]$CustomTunnel     = "",  # Tunnel name (default: wgcf-profile)
     [string]$CustomEndpointIP = "",  # Server IP or CIDR (e.g. "1.2.3.4/32")
-    [int]$CustomPort          = 0    # WireGuard port (default: 2408)
+    [int]$CustomPort          = 0,   # WireGuard port (default: 2408)
+    [switch]$PrivacyUpgradeOnly,      # v13.5+ privacy/integrity refresh without full reinstall
+    [switch]$NoPause                  # skip end pause (CI / automated resume)
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '13.4'
+$WG_KS_VERSION = '13.5'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -422,35 +426,111 @@ function Disable-AllIPv6Bindings {
     } catch {}
 }
 
+function Get-ChromiumPrivacyDWordProps {
+    return @{
+        WebRtcLocalhostCandidateAllowed      = 0
+        BlockThirdPartyCookies               = 1
+        DefaultThirdPartyCookieSetting       = 1
+        EnableDoNotTrack                     = 1
+        MetricsReportingEnabled              = 0
+        DeviceMetricsReportingEnabled        = 0
+        PaymentMethodQueryEnabled            = 0
+        BrowserSignin                        = 0
+        SyncDisabled                         = 1
+        AutofillAddressEnabled               = 0
+        AutofillCreditCardEnabled            = 0
+        DefaultGeolocationSetting            = 2
+        DefaultNotificationsSetting          = 2
+        SafeBrowsingExtendedReportingEnabled = 0
+        ChromeVariations                     = 0
+        PrivacySandboxAdTopicsEnabled        = 0
+        PrivacySandboxPromptEnabled          = 0
+        PrivacySandboxAdMeasurementEnabled   = 0
+        QuicAllowed                          = 0
+        BrowserNetworkTimeQueriesEnabled     = 0
+        SearchSuggestEnabled                 = 0
+        NetworkPredictionOptions             = 2
+        SharingDisabled                      = 1
+        PasswordManagerEnabled               = 0
+    }
+}
+
+function Get-FirefoxPrivacyPolicyJson {
+    return @'
+{
+  "policies": {
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DoNotTrack": true,
+    "Cookies": {
+      "Default": "reject-third-party",
+      "RejectThirdParty": true,
+      "Locked": true
+    },
+    "Preferences": {
+      "media.peerconnection.ice.no_host": { "Value": true, "Status": "locked" },
+      "media.peerconnection.ice.default_address_only": { "Value": true, "Status": "locked" },
+      "privacy.resistFingerprinting": { "Value": true, "Status": "locked" },
+      "privacy.fingerprintingProtection": { "Value": true, "Status": "locked" },
+      "privacy.trackingprotection.enabled": { "Value": true, "Status": "locked" },
+      "privacy.trackingprotection.socialtracking.enabled": { "Value": true, "Status": "locked" },
+      "network.cookie.cookieBehavior": { "Value": 1, "Status": "locked" },
+      "geo.enabled": { "Value": false, "Status": "locked" },
+      "privacy.donottrackheader.enabled": { "Value": true, "Status": "locked" },
+      "browser.contentblocking.category": { "Value": "strict", "Status": "locked" },
+      "webgl.disabled": { "Value": true, "Status": "locked" },
+      "dom.webgpu.enabled": { "Value": false, "Status": "locked" },
+      "network.http.referer.defaultPolicy": { "Value": 1, "Status": "locked" }
+    }
+  }
+}
+'@
+}
+
+function Get-WindowsPrivacyRegBlocks {
+    return @(
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Props = @{
+            AllowTelemetry = 0; MaxTelemetryAllowed = 0; DoNotShowFeedbackNotifications = 1
+            DisableOneSettingsDownloads = 1; DisableTailoredExperiencesWithDiagnosticData = 1
+            AllowDeviceNameInTelemetry = 0; AllowWUfBCloudProcessing = 0
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'; Props = @{ AllowTelemetry = 0 }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo'; Props = @{ DisabledByGroupPolicy = 1 }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; Props = @{
+            PublishUserActivities = 0; EnableActivityFeed = 0; UploadUserActivities = 0; EnableClipboardHistory = 0
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors'; Props = @{
+            DisableLocation = 1; DisableLocationScripting = 1; DisableSensors = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Props = @{ AllowCortana = 0; AllowCloudSearch = 0 }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization'; Props = @{
+            RestrictImplicitInkCollection = 1; RestrictImplicitTextCollection = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Props = @{
+            DisableWindowsConsumerFeatures = 1; DisableCloudOptimizedContent = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'; Props = @{
+            LetAppsAccessAdvertisingId = 2; LetAppsAccessLocation = 2; LetAppsAccessMicrophone = 2; LetAppsAccessCamera = 2
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting'; Props = @{
+            Disabled = 1; DontSendAdditionalData = 1; LoggingDisabled = 1
+        }}
+    )
+}
+
 function Set-ChromiumPrivacyPolicies([string]$PolicyPath, [string]$Label) {
-    $props = @{
-        WebRtcIpHandlingPolicy               = @{ Type = 'String'; Value = 'default_public_interface_only' }
-        WebRtcLocalhostCandidateAllowed      = @{ Type = 'DWord';  Value = 0 }
-        BlockThirdPartyCookies               = @{ Type = 'DWord';  Value = 1 }
-        DefaultThirdPartyCookieSetting       = @{ Type = 'DWord';  Value = 1 }
-        EnableDoNotTrack                     = @{ Type = 'DWord';  Value = 1 }
-        MetricsReportingEnabled              = @{ Type = 'DWord';  Value = 0 }
-        DeviceMetricsReportingEnabled        = @{ Type = 'DWord';  Value = 0 }
-        PaymentMethodQueryEnabled            = @{ Type = 'DWord';  Value = 0 }
-        BrowserSignin                        = @{ Type = 'DWord';  Value = 0 }
-        SyncDisabled                         = @{ Type = 'DWord';  Value = 1 }
-        AutofillAddressEnabled               = @{ Type = 'DWord';  Value = 0 }
-        AutofillCreditCardEnabled            = @{ Type = 'DWord';  Value = 0 }
-        DefaultGeolocationSetting            = @{ Type = 'DWord';  Value = 2 }
-        SafeBrowsingExtendedReportingEnabled = @{ Type = 'DWord';  Value = 0 }
-        ChromeVariations                     = @{ Type = 'DWord';  Value = 0 }
+    $props = Get-ChromiumPrivacyDWordProps
+    New-Item -Path $PolicyPath -Force | Out-Null
+    Set-ItemProperty $PolicyPath 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
+    Set-ItemProperty $PolicyPath 'DnsOverHttpsMode' 'off' -Type String -Force
+    Set-ItemProperty $PolicyPath 'ExtensionInstallBlocklist' '*' -Type String -Force
+    foreach ($kv in $props.GetEnumerator()) {
+        Set-ItemProperty $PolicyPath $kv.Key $kv.Value -Type DWord -Force
     }
     if ($PolicyPath -match 'Microsoft\\Edge') {
-        $props['PersonalizationReportingEnabled'] = @{ Type = 'DWord'; Value = 0 }
-        $props['DiagnosticData'] = @{ Type = 'DWord'; Value = 0 }
-    }
-    New-Item -Path $PolicyPath -Force | Out-Null
-    foreach ($kv in $props.GetEnumerator()) {
-        if ($kv.Value.Type -eq 'String') {
-            Set-ItemProperty $PolicyPath $kv.Key $kv.Value.Value -Type String -Force
-        } else {
-            Set-ItemProperty $PolicyPath $kv.Key $kv.Value.Value -Type DWord -Force
-        }
+        Set-ItemProperty $PolicyPath 'PersonalizationReportingEnabled' 0 -Type DWord -Force
+        Set-ItemProperty $PolicyPath 'DiagnosticData' 0 -Type DWord -Force
     }
     OK "Browser privacy: $Label"
 }
@@ -464,30 +544,7 @@ function Install-BrowserPrivacyPolicies {
         try { Set-ChromiumPrivacyPolicies $b.Path $b.Label }
         catch { WARN "Browser privacy failed: $($b.Label)" }
     }
-    $ffPolicy = @'
-{
-  "policies": {
-    "DisableTelemetry": true,
-    "DoNotTrack": true,
-    "Cookies": {
-      "Default": "reject-third-party",
-      "RejectThirdParty": true,
-      "Locked": true
-    },
-    "Preferences": {
-      "media.peerconnection.ice.no_host": { "Value": true, "Status": "locked" },
-      "media.peerconnection.ice.default_address_only": { "Value": true, "Status": "locked" },
-      "privacy.resistFingerprinting": { "Value": true, "Status": "locked" },
-      "privacy.trackingprotection.enabled": { "Value": true, "Status": "locked" },
-      "privacy.trackingprotection.socialtracking.enabled": { "Value": true, "Status": "locked" },
-      "network.cookie.cookieBehavior": { "Value": 1, "Status": "locked" },
-      "geo.enabled": { "Value": false, "Status": "locked" },
-      "privacy.donottrackheader.enabled": { "Value": true, "Status": "locked" },
-      "browser.contentblocking.category": { "Value": "strict", "Status": "locked" }
-    }
-  }
-}
-'@
+    $ffPolicy = Get-FirefoxPrivacyPolicyJson
     foreach ($ffDir in @('C:\Program Files\Mozilla Firefox\distribution', 'C:\Program Files (x86)\Mozilla Firefox\distribution')) {
         $ffRoot = Split-Path $ffDir -Parent
         if (-not (Test-Path $ffRoot)) { continue }
@@ -500,29 +557,7 @@ function Install-BrowserPrivacyPolicies {
 }
 
 function Install-WindowsTelemetryReduction {
-    $regBlocks = @(
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Props = @{
-            AllowTelemetry = 0; MaxTelemetryAllowed = 0; DoNotShowFeedbackNotifications = 1
-            DisableOneSettingsDownloads = 1; DisableTailoredExperiencesWithDiagnosticData = 1
-        }}
-        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'; Props = @{ AllowTelemetry = 0 }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo'; Props = @{ DisabledByGroupPolicy = 1 }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; Props = @{
-            PublishUserActivities = 0; EnableActivityFeed = 0; UploadUserActivities = 0
-        }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors'; Props = @{
-            DisableLocation = 1; DisableLocationScripting = 1
-        }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Props = @{ AllowCortana = 0; AllowCloudSearch = 0 }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization'; Props = @{
-            RestrictImplicitInkCollection = 1; RestrictImplicitTextCollection = 1
-        }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Props = @{
-            DisableWindowsConsumerFeatures = 1; DisableCloudOptimizedContent = 1
-        }}
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'; Props = @{ LetAppsAccessAdvertisingId = 2 }}
-    )
-    foreach ($block in $regBlocks) {
+    foreach ($block in (Get-WindowsPrivacyRegBlocks)) {
         try {
             New-Item -Path $block.Path -Force | Out-Null
             foreach ($kv in $block.Props.GetEnumerator()) {
@@ -534,7 +569,7 @@ function Install-WindowsTelemetryReduction {
         & sc.exe config $svc start= disabled 2>$null | Out-Null
         & sc.exe stop $svc 2>$null | Out-Null
     }
-    OK 'Windows privacy: telemetry/ads/cloud reduced'
+    OK 'Windows privacy: consumer telemetry reduced (not eliminated)'
 }
 
 function Install-PrivacyHardening {
@@ -542,16 +577,114 @@ function Install-PrivacyHardening {
     Install-WindowsTelemetryReduction
 }
 
+function Write-PrivacyHardeningGuardPs1 {
+    $dwords = Get-ChromiumPrivacyDWordProps
+    $dwordInit = ($dwords.GetEnumerator() | ForEach-Object { "        $($_.Key)=$($_.Value)" }) -join "`n"
+    $ffJson = (Get-FirefoxPrivacyPolicyJson) -replace "'", "''"
+    $regInit = (Get-WindowsPrivacyRegBlocks | ForEach-Object {
+        $pairs = ($_.Props.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ';'
+        "    @{ Path='$($_.Path)'; Props=@{ $pairs }}"
+    }) -join ",`n"
+    $content = @"
+# Privacy Hardening Guard v$WG_KS_VERSION (auto-generated by install.ps1)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$LOG = 'C:\WireGuard\killswitch.log'
+function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [PRIVACY] `$m" -Encoding UTF8 } catch {} }
+function Set-ChromiumPrivacyPolicies([string]`$PolicyPath, [string]`$Label) {
+    `$props = @{
+$dwordInit
+    }
+    New-Item -Path `$PolicyPath -Force | Out-Null
+    Set-ItemProperty `$PolicyPath 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
+    Set-ItemProperty `$PolicyPath 'DnsOverHttpsMode' 'off' -Type String -Force
+    Set-ItemProperty `$PolicyPath 'ExtensionInstallBlocklist' '*' -Type String -Force
+    foreach (`$kv in `$props.GetEnumerator()) { Set-ItemProperty `$PolicyPath `$kv.Key `$kv.Value -Type DWord -Force }
+    if (`$PolicyPath -match 'Microsoft\\Edge') {
+        Set-ItemProperty `$PolicyPath 'PersonalizationReportingEnabled' 0 -Type DWord -Force
+        Set-ItemProperty `$PolicyPath 'DiagnosticData' 0 -Type DWord -Force
+    }
+    Log "`$Label browser privacy applied"
+}
+foreach (`$b in @(
+    @{ Path='HKLM:\SOFTWARE\Policies\Google\Chrome'; Label='Chrome' },
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label='Edge' },
+    @{ Path='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label='Brave' }
+)) { try { Set-ChromiumPrivacyPolicies `$b.Path `$b.Label } catch { Log "`$(`$b.Label) failed: `$_" } }
+`$ffPolicy = @'
+$ffJson
+'@
+foreach (`$ffDir in @('C:\Program Files\Mozilla Firefox\distribution','C:\Program Files (x86)\Mozilla Firefox\distribution')) {
+    `$ffRoot = Split-Path `$ffDir -Parent
+    if (-not (Test-Path `$ffRoot)) { continue }
+    try {
+        New-Item -Path `$ffDir -ItemType Directory -Force | Out-Null
+        `$ffPolicy | Set-Content (Join-Path `$ffDir 'policies.json') -Encoding UTF8 -Force
+        Log "Firefox privacy applied (`$ffRoot)"
+    } catch { Log "Firefox failed: `$_" }
+}
+`$regBlocks = @(
+$regInit
+)
+foreach (`$block in `$regBlocks) {
+    try {
+        New-Item -Path `$block.Path -Force | Out-Null
+        foreach (`$kv in `$block.Props.GetEnumerator()) { Set-ItemProperty `$block.Path `$kv.Key `$kv.Value -Type DWord -Force }
+    } catch { Log "Registry failed: `$(`$block.Path)" }
+}
+foreach (`$svc in @('DiagTrack','dmwappushservice')) { & sc.exe config `$svc start= disabled 2>`$null | Out-Null; & sc.exe stop `$svc 2>`$null | Out-Null }
+Log 'Windows privacy reduction applied'
+"@
+    $content | Set-Content $PRIVACY_GUARD_PS1 -Encoding UTF8 -Force
+    attrib +S +H $PRIVACY_GUARD_PS1 2>$null | Out-Null
+}
+
+function Install-ScriptIntegrityVault {
+    if (-not (Test-Path 'HKLM:\SOFTWARE\WGKillSwitch')) {
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+    }
+    $vaultFiles = @(
+        $MONITOR_PS1, $REPAIR_PS1, $PRIVACY_GUARD_PS1, $ANTI_TAMPER_PS1, $WMI_WRAPPER,
+        (Join-Path $INSTALL_DIR 'install.ps1')
+    )
+    foreach ($f in $vaultFiles) {
+        if (-not (Test-Path $f)) { continue }
+        if ((Get-Item -LiteralPath $f -EA SilentlyContinue) -is [System.IO.DirectoryInfo]) { continue }
+        $leaf = Split-Path $f -Leaf
+        $hash = (Get-FileHash -Path $f -Algorithm SHA256).Hash
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' "Hash_$leaf" $hash -Force
+    }
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'IntegrityVaultDate' (Get-Date -Format 'o') -Force
+}
+
 function Test-PrivacyChromiumPolicy([string]$VendorPath) {
     $p = Get-ItemProperty "HKLM:\SOFTWARE\Policies\$VendorPath" -EA SilentlyContinue
     return ($p -and $p.WebRtcIpHandlingPolicy -eq 'default_public_interface_only' -and
             $p.WebRtcLocalhostCandidateAllowed -eq 0 -and $p.BlockThirdPartyCookies -eq 1 -and
-            $p.MetricsReportingEnabled -eq 0)
+            $p.MetricsReportingEnabled -eq 0 -and $p.DnsOverHttpsMode -eq 'off' -and
+            $p.PrivacySandboxAdTopicsEnabled -eq 0 -and $p.QuicAllowed -eq 0)
 }
 
 function Test-WindowsTelemetryReduced {
     $p = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -EA SilentlyContinue
-    return ($p -and $p.AllowTelemetry -eq 0)
+    $wer = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting' -EA SilentlyContinue
+    return ($p -and $p.AllowTelemetry -eq 0 -and $wer -and $wer.Disabled -eq 1)
+}
+
+function Test-ScriptIntegrityVault {
+    $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
+    if (-not $reg) { return $false }
+    foreach ($pair in @(
+        @{ File = $MONITOR_PS1; Key = 'Hash_monitor.ps1' },
+        @{ File = $REPAIR_PS1; Key = 'Hash_repair.ps1' },
+        @{ File = $PRIVACY_GUARD_PS1; Key = 'Hash_privacy-hardening-guard.ps1' }
+    )) {
+        $expected = $reg.$($pair.Key)
+        if ([string]::IsNullOrWhiteSpace($expected)) { return $false }
+        if (-not (Test-Path $pair.File)) { return $false }
+        $actual = (Get-FileHash -Path $pair.File -Algorithm SHA256).Hash
+        if ($actual -ne $expected) { return $false }
+    }
+    return $true
 }
 
 function Stop-AllMonitorProcs {
@@ -689,7 +822,9 @@ function Write-GuardBackups {
     attrib +H +S $GUARD_DIR 2>$null | Out-Null
     Get-ChildItem $GUARD_DIR -File -EA SilentlyContinue | ForEach-Object { attrib +H +S $_.FullName 2>$null | Out-Null }
 
-    New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+    if (-not (Test-Path 'HKLM:\SOFTWARE\WGKillSwitch')) {
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+    }
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'Version' $WG_KS_VERSION -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GuardDir' $GUARD_DIR -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'StartupLnk' $STARTUP_LNK -Force
@@ -765,6 +900,43 @@ function Get-ServerIPs {
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]"Administrator")) {
     Write-Host "`n [!!] Run as Administrator!" -ForegroundColor Red; pause; exit 1
+}
+
+if ($PrivacyUpgradeOnly) {
+    Write-Step "PRIVACY UPGRADE ONLY (v$WG_KS_VERSION)"
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    Write-PrivacyHardeningGuardPs1
+    OK "privacy-hardening-guard.ps1 written"
+    $webrtcForwarder = @"
+# WebRTC forwarder (v$WG_KS_VERSION)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path `$main) { & `$main }
+"@
+    $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
+    attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
+    OK "webrtc-leak-guard.ps1 forwarder written"
+    Install-PrivacyHardening
+    Write-GuardBackups
+    Install-ScriptIntegrityVault
+    $upgWarn = 0
+    foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
+        if (Test-PrivacyChromiumPolicy $pair[0]) { OK "Browser privacy: $($pair[1])" }
+        else { WARN "Browser privacy: $($pair[1]) incomplete"; $upgWarn++ }
+    }
+    if (Test-WindowsTelemetryReduced) { OK "Windows telemetry: reduced (not eliminated)" }
+    else { WARN "Windows telemetry: not confirmed"; $upgWarn++ }
+    if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" }
+    else { WARN "Script integrity vault: mismatch or missing"; $upgWarn++ }
+    try { Log "privacy upgrade v$WG_KS_VERSION completed" } catch {}
+    Write-Host ""
+    if ($upgWarn -eq 0) {
+        Write-Host "  PRIVACY UPGRADE COMPLETE (v$WG_KS_VERSION)" -ForegroundColor Green
+    } else {
+        Write-Host "  PRIVACY UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
+    }
+    Write-Host "  Restart browsers for policy changes. Cloudflare still sees WARP traffic." -ForegroundColor Gray
+    exit 0
 }
 
 # ================================================================
@@ -2615,72 +2787,9 @@ OK "anti-tamper.ps1 written"
 # ================================================================
 Write-Step "STEP 10c - PRIVACY HARDENING GUARD SCRIPT"
 # ================================================================
-$privacyGuardVersion = $WG_KS_VERSION
-$privacyGuardContent = @"
-# Privacy Hardening Guard v$privacyGuardVersion (auto-generated by install.ps1)
-`$ErrorActionPreference = 'SilentlyContinue'
-`$LOG = 'C:\WireGuard\killswitch.log'
-function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [PRIVACY] `$m" -Encoding UTF8 } catch {} }
-function Set-ChromiumPrivacyPolicies([string]`$PolicyPath, [string]`$Label) {
-    `$props = @{
-        WebRtcIpHandlingPolicy='default_public_interface_only'; WebRtcLocalhostCandidateAllowed=0
-        BlockThirdPartyCookies=1; DefaultThirdPartyCookieSetting=1; EnableDoNotTrack=1
-        MetricsReportingEnabled=0; DeviceMetricsReportingEnabled=0; PaymentMethodQueryEnabled=0
-        BrowserSignin=0; SyncDisabled=1; AutofillAddressEnabled=0; AutofillCreditCardEnabled=0
-        DefaultGeolocationSetting=2; SafeBrowsingExtendedReportingEnabled=0; ChromeVariations=0
-    }
-    New-Item -Path `$PolicyPath -Force | Out-Null
-    Set-ItemProperty `$PolicyPath 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
-    foreach (`$kv in `$props.GetEnumerator()) {
-        if (`$kv.Key -eq 'WebRtcIpHandlingPolicy') { continue }
-        Set-ItemProperty `$PolicyPath `$kv.Key `$kv.Value -Type DWord -Force
-    }
-    if (`$PolicyPath -match 'Microsoft\\Edge') {
-        Set-ItemProperty `$PolicyPath 'PersonalizationReportingEnabled' 0 -Type DWord -Force
-        Set-ItemProperty `$PolicyPath 'DiagnosticData' 0 -Type DWord -Force
-    }
-    Log "`$Label browser privacy applied"
-}
-foreach (`$b in @(
-    @{ Path='HKLM:\SOFTWARE\Policies\Google\Chrome'; Label='Chrome' },
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label='Edge' },
-    @{ Path='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label='Brave' }
-)) { try { Set-ChromiumPrivacyPolicies `$b.Path `$b.Label } catch { Log "`$(`$b.Label) failed: `$_" } }
-`$ffPolicy = @'
-{"policies":{"DisableTelemetry":true,"DoNotTrack":true,"Cookies":{"Default":"reject-third-party","RejectThirdParty":true,"Locked":true},"Preferences":{"media.peerconnection.ice.no_host":{"Value":true,"Status":"locked"},"media.peerconnection.ice.default_address_only":{"Value":true,"Status":"locked"},"privacy.resistFingerprinting":{"Value":true,"Status":"locked"},"privacy.trackingprotection.enabled":{"Value":true,"Status":"locked"},"privacy.trackingprotection.socialtracking.enabled":{"Value":true,"Status":"locked"},"network.cookie.cookieBehavior":{"Value":1,"Status":"locked"},"geo.enabled":{"Value":false,"Status":"locked"},"privacy.donottrackheader.enabled":{"Value":true,"Status":"locked"},"browser.contentblocking.category":{"Value":"strict","Status":"locked"}}}}
-'@
-foreach (`$ffDir in @('C:\Program Files\Mozilla Firefox\distribution','C:\Program Files (x86)\Mozilla Firefox\distribution')) {
-    `$ffRoot = Split-Path `$ffDir -Parent
-    if (-not (Test-Path `$ffRoot)) { continue }
-    try {
-        New-Item -Path `$ffDir -ItemType Directory -Force | Out-Null
-        `$ffPolicy | Set-Content (Join-Path `$ffDir 'policies.json') -Encoding UTF8 -Force
-        Log "Firefox privacy applied (`$ffRoot)"
-    } catch { Log "Firefox failed: `$_" }
-}
-`$regBlocks = @(
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Props=@{AllowTelemetry=0;MaxTelemetryAllowed=0;DoNotShowFeedbackNotifications=1;DisableOneSettingsDownloads=1;DisableTailoredExperiencesWithDiagnosticData=1}},
-    @{ Path='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'; Props=@{AllowTelemetry=0}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo'; Props=@{DisabledByGroupPolicy=1}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; Props=@{PublishUserActivities=0;EnableActivityFeed=0;UploadUserActivities=0}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors'; Props=@{DisableLocation=1;DisableLocationScripting=1}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Props=@{AllowCortana=0;AllowCloudSearch=0}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization'; Props=@{RestrictImplicitInkCollection=1;RestrictImplicitTextCollection=1}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Props=@{DisableWindowsConsumerFeatures=1;DisableCloudOptimizedContent=1}},
-    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'; Props=@{LetAppsAccessAdvertisingId=2}}
-)
-foreach (`$block in `$regBlocks) {
-    try {
-        New-Item -Path `$block.Path -Force | Out-Null
-        foreach (`$kv in `$block.Props.GetEnumerator()) { Set-ItemProperty `$block.Path `$kv.Key `$kv.Value -Type DWord -Force }
-    } catch { Log "Registry failed: `$(`$block.Path)" }
-}
-foreach (`$svc in @('DiagTrack','dmwappushservice')) { & sc.exe config `$svc start= disabled 2>`$null | Out-Null; & sc.exe stop `$svc 2>`$null | Out-Null }
-Log 'Windows privacy reduction applied'
-"@
-$privacyGuardContent | Set-Content $PRIVACY_GUARD_PS1 -Encoding UTF8 -Force
-attrib +S +H $PRIVACY_GUARD_PS1 2>$null | Out-Null
+Write-PrivacyHardeningGuardPs1
 OK "privacy-hardening-guard.ps1 written"
+$privacyGuardVersion = $WG_KS_VERSION
 $webrtcForwarder = @"
 # WebRTC forwarder (v$privacyGuardVersion)
 `$ErrorActionPreference = 'SilentlyContinue'
@@ -2973,6 +3082,7 @@ Write-Step "STEP 18b - PRIVACY HARDENING"
 Install-PrivacyHardening
 if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: deployed" } else { WARN "privacy-hardening-guard.ps1: missing" }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: deployed" } else { WARN "webrtc-leak-guard.ps1: missing" }
+if (Test-ScriptIntegrityVault) { OK "Script integrity vault: seeded" } else { WARN "Script integrity vault: not verified" }
 
 # ================================================================
 Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
@@ -3005,6 +3115,7 @@ if (-not (Test-SafeToOpen)) {
     OK "Tunnel + internet OK - monitor taking over"
 }
 Write-GuardBackups
+Install-ScriptIntegrityVault
 OK "Guard vault refreshed (final script versions)"
 
 # ================================================================
@@ -3095,9 +3206,10 @@ foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('
     if (Test-PrivacyChromiumPolicy $pair[0]) { OK "Browser privacy: $($pair[1])" }
     else { WARN "Browser privacy: $($pair[1]) incomplete"; $warnings++ }
 }
-if (Test-WindowsTelemetryReduced) { OK "Windows telemetry: reduced" } else { WARN "Windows telemetry: not confirmed"; $warnings++ }
+if (Test-WindowsTelemetryReduced) { OK "Windows telemetry: reduced (not eliminated)" } else { WARN "Windows telemetry: not confirmed"; $warnings++ }
 if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: present" } else { WARN "privacy-hardening-guard.ps1: missing"; $warnings++ }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: present" } else { WARN "webrtc-leak-guard.ps1: missing"; $warnings++ }
+if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" } else { WARN "Script integrity vault: mismatch"; $warnings++ }
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
@@ -3136,5 +3248,5 @@ if ($CUSTOM_MODE) {
     Write-Host "  .\install.ps1 -CustomConfig C:\myvpn.conf -CustomTunnel myvpn -CustomEndpointIP 1.2.3.4/32 -CustomPort 51820" -ForegroundColor DarkGray
     Write-Host ""
 }
-pause
+if (-not $NoPause) { pause }
 

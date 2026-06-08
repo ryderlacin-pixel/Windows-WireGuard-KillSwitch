@@ -9,13 +9,13 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.4** is the current production release (privacy hardening + kill switch — protection always stays installed).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.5** is the current production release (privacy engineer pass + kill switch — protection always stays installed).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.4](docs/releases/v13.4.md)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.5](docs/releases/v13.5.md)**.
 
 **Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
 
@@ -269,9 +269,14 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v13.4 (production — current)
+### v13.5 (production — current)
+- **Privacy engineer pass:** Privacy Sandbox/DoH/QUIC off, Firefox RFP+, WER reduced, script SHA256 vault
+- Honest scores: leak **8–8.5/10**, tracking **7.5–8/10**, anonymity **7–8/10** (WARP threat model)
+- Fast upgrade: `.\install.ps1 -PrivacyUpgradeOnly`
+- See **[docs/releases/v13.5.md](docs/releases/v13.5.md)**
+
+### v13.4
 - **Privacy hardening:** cookies, fingerprinting, telemetry, ads/cloud features + v13.3 WebRTC
-- General anonymity **~9/10** within project scope
 - See **[docs/releases/v13.4.md](docs/releases/v13.4.md)**
 
 ### v13.3
