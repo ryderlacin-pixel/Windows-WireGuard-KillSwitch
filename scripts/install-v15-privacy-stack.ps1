@@ -63,6 +63,12 @@ function Write-DnsLockdownGuardPs1 {
 `$LOG = 'C:\WireGuard\killswitch.log'
 `$REG = 'HKLM:\SOFTWARE\WGKillSwitch'
 function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [DNS-LOCK] `$m" -Encoding UTF8 } catch {} }
+`$tunnel = & sc.exe query 'WireGuardTunnel`$wgcf-profile' 2>&1 | Out-String
+if (`$tunnel -notmatch 'RUNNING') {
+    Log 'SKIP: WireGuard tunnel not RUNNING - refusing DNS lock (prevents internet brick)'
+    Set-ItemProperty `$REG 'DnsLockdownState' 'DEFERRED' -Force -EA SilentlyContinue
+    exit 0
+}
 `$st = & sc.exe query 'WG-DnscryptProxy' 2>&1 | Out-String
 `$net = & netstat.exe -ano 2>&1 | Out-String
 if (`$st -notmatch 'RUNNING' -or `$net -notmatch '127\.0\.0\.1:53\s+.*LISTENING') {

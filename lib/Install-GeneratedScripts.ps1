@@ -742,7 +742,7 @@ function Sync-KillSwitchState {
     }
 }
 
-function IsMainMonitor([string]$cmd) {
+function Test-IsMainMonitor([string]$cmd) {
     if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
     return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
 }
@@ -753,7 +753,7 @@ function GetMonitorShellProcs() {
         Get-Process $shell -EA SilentlyContinue | ForEach-Object {
             try {
                 $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-                if (IsMainMonitor $c) { $found += $_ }
+                if (Test-IsMainMonitor $c) { $found += $_ }
             } catch {}
         }
     }
@@ -1083,7 +1083,7 @@ function Log($m) {
         Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WMI] $m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
 }
-function IsMainMonitor([string]$cmd) {
+function Test-IsMainMonitor([string]$cmd) {
     if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
     return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
 }
@@ -1093,7 +1093,7 @@ function GetMonitorShellProcs() {
         Get-Process $shell -EA SilentlyContinue | ForEach-Object {
             try {
                 $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-                if (IsMainMonitor $c) { $found += $_ }
+                if (Test-IsMainMonitor $c) { $found += $_ }
             } catch {}
         }
     }
@@ -1153,7 +1153,7 @@ function Log($m) {
         Add-Content $LOG "$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [SVC] $m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if ($mutex) { try { $mutex.ReleaseMutex() } catch {} } }
 }
-function IsMainMonitor([string]$cmd) {
+function Test-IsMainMonitor([string]$cmd) {
     if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
     return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
 }
@@ -1163,7 +1163,7 @@ function GetMonitorShellProcs() {
         Get-Process $shell -EA SilentlyContinue | ForEach-Object {
             try {
                 $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-                if (IsMainMonitor $c) { $found += $_ }
+                if (Test-IsMainMonitor $c) { $found += $_ }
             } catch {}
         }
     }

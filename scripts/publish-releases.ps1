@@ -87,6 +87,7 @@ $releases = @{
     "v15.2.2" = @{ name = "v15.2.2 - Invoke-SafeRegistrySet splat fix (STEP 4 install)" }
     "v15.2.3" = @{ name = "v15.2.3 - Critical install hotfixes (dnscrypt path, fail-soft privacy stack)" }
     "v15.2.4" = @{ name = "v15.2.4 - Install internet protection (defer DNS lock until dnscrypt healthy)" }
+    "v15.2.6" = @{ name = "v15.2.6 - Code review critical fixes (mutex, GPO regex, ScriptsPath, admin order)" }
 }
 
 function Get-ReleaseBody($tag) {

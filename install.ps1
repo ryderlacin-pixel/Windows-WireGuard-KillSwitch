@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.4)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.6)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
@@ -32,6 +32,14 @@ param(
     [switch]$NoPause
 )
 $ErrorActionPreference = "Continue"
+
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]"Administrator")) {
+    Write-Host "`n [!!] Run as Administrator!" -ForegroundColor Red
+    if (-not $NoPause) { pause }
+    exit 1
+}
+
 $script:InstallDryRun = $DryRun.IsPresent
 $script:EnableFailsafe = $EnableFailsafe
 Set-Location -LiteralPath $PSScriptRoot
@@ -63,13 +71,6 @@ $v14StackPath = Join-Path $PSScriptRoot 'scripts\install-v14-stack.ps1'
 if (Test-Path $v14StackPath) { . $v14StackPath } else { Write-Host ' [WARN] install-v14-stack.ps1 missing - v14 features disabled' -ForegroundColor Yellow }
 $v15StackPath = Join-Path $PSScriptRoot 'scripts\install-v15-privacy-stack.ps1'
 if (Test-Path $v15StackPath) { . $v15StackPath } else { Write-Host ' [WARN] install-v15-privacy-stack.ps1 missing - v15 features disabled' -ForegroundColor Yellow }
-
-if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]"Administrator")) {
-    Write-Host "`n [!!] Run as Administrator!" -ForegroundColor Red
-    if (-not $NoPause) { pause }
-    exit 1
-}
 
 if ($DryRun) {
     Write-Host "`n [DRY-RUN] Active - no firewall rules, firewall policy, adapter bindings, or IPv6 registry lock." -ForegroundColor Yellow

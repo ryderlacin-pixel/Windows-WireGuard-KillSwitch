@@ -48,6 +48,10 @@ foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
     foreach ($comp in @('ms_tcpip', 'ms_tcpip6', 'ms_lldp', 'ms_lltdio', 'ms_rspndr', 'ms_server', 'ms_msclient', 'ms_pacer', 'ms_mslldp')) {
         try { Enable-NetAdapterBinding -Name $a.Name -ComponentID $comp -EA SilentlyContinue | Out-Null } catch {}
     }
+    try {
+        netsh interface ipv4 set dnsservers name="$($a.Name)" source=dhcp 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-Log "DNS restored to DHCP on: $($a.Name)" }
+    } catch {}
     Write-Log "Physical adapter restored: $($a.Name)"
 }
 

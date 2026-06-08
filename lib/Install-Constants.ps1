@@ -1,6 +1,6 @@
-# Dot-sourced from install.ps1 Ã¢â‚¬â€ Install-Constants.ps1 (v15.1 modular split)
+# Dot-sourced from install.ps1 - Install-Constants.ps1 (v15.1 modular split)
 #Requires -Version 5.1
-$WG_KS_VERSION = '15.2.4'
+$WG_KS_VERSION = '15.2.6'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -16,7 +16,7 @@ $NSSM        = "$INSTALL_DIR\nssm.exe"
 
 # -- Names --
 $TUNNEL_NAME  = "wgcf-profile"
-$TUNNEL_SVC   = "WireGuardTunnel`$wgcf-profile"
+$TUNNEL_SVC   = 'WireGuardTunnel$' + $TUNNEL_NAME
 $TASK_MONITOR = "WG-KillSwitch"
 $TASK_REPAIR  = "WG-RepairTask"
 $TASK_REBOOT_VERIFY = "WG-RebootVerify"

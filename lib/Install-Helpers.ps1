@@ -61,22 +61,36 @@ function Test-SafeToOpen {
 
 function Log([string]$Message) {
     $mutex = $null
+    $acquired = $false
     try {
-        $mutex = New-Object System.Threading.Mutex($false, "Global\WGKillSwitchLog")
-        if (-not (Wait-NamedMutex $mutex 3000)) { return }
+        $mutex = New-Object System.Threading.Mutex($false, 'Global\WGKillSwitchLog')
+        $acquired = Wait-NamedMutex $mutex 3000
+        if (-not $acquired) { return }
         Add-Content -Path $LOG -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | $Message" -Encoding UTF8 -EA SilentlyContinue
         try {
             $s = Get-Content $LOG -Encoding UTF8 -EA Stop
             if ($s.Count -gt 500) { $s | Select-Object -Last 250 | Set-Content $LOG -Encoding UTF8 -Force }
         } catch {}
     } finally {
-        if ($mutex) { try { $mutex.ReleaseMutex() } catch {} }
+        if ($mutex) {
+            if ($acquired) { try { $mutex.ReleaseMutex() } catch {} }
+            $mutex.Dispose()
+        }
     }
 }
 
 $script:CimShort = $null
 function Get-ShortCimSession {
-    if ($script:CimShort) { return $script:CimShort }
+    if ($script:CimShort) {
+        try {
+            $null = Get-CimInstance -CimSession $script:CimShort -ClassName Win32_ComputerSystem -EA Stop |
+                Select-Object -First 1
+            return $script:CimShort
+        } catch {
+            try { Remove-CimSession $script:CimShort -EA SilentlyContinue } catch {}
+            $script:CimShort = $null
+        }
+    }
     try {
         $opt = New-CimSessionOption -OperationTimeout (New-TimeSpan -Seconds 8)
         $script:CimShort = New-CimSession -SessionOption $opt -ErrorAction Stop
@@ -234,9 +248,21 @@ function Invoke-DeferredPrivacyGuards {
         WARN 'Privacy guards deferred: install still in progress'
         return
     }
+    if (-not (Test-TunnelRunning)) {
+        WARN 'Privacy guards deferred: WireGuard tunnel not RUNNING (repair will retry)'
+        return
+    }
     if (-not (Test-DnscryptListening)) {
         WARN 'Privacy guards deferred: dnscrypt not listening on 127.0.0.1:53 (repair will retry)'
         return
+    }
+    if (Get-Command Unlock-WireGuardConfigForWrite -ErrorAction SilentlyContinue) {
+        Unlock-WireGuardConfigForWrite
+    } elseif (Test-Path $CONFIG) {
+        try {
+            icacls $CONFIG /grant 'BUILTIN\Administrators:F' /C 2>$null | Out-Null
+            attrib -R -S -H $CONFIG 2>$null | Out-Null
+        } catch {}
     }
     foreach ($g in @(
         $(if ($script:DNSCRYPT_GUARD_PS1) { $script:DNSCRYPT_GUARD_PS1 } else { "$INSTALL_DIR\dnscrypt-guard.ps1" }),

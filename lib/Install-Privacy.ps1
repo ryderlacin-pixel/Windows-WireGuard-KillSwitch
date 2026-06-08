@@ -349,18 +349,18 @@ function Update-GpoScriptsIni($iniPath, $scriptPath) {
     }
     if ($null -eq $content) { $content = "" }
     if ($content -match [regex]::Escape($scriptPath)) { Write-Info "GPO scripts.ini: already registered"; return }
-    if ($content -match "\[Startup\]") {
+    if ($content -match '\[Startup\]') {
         $maxIndex = -1; $startup = $false
         foreach ($line in ($content -split "`r?`n")) {
-            if ($line -match "^\[Startup\]") { $startup = $true; continue }
-            if ($line -match "^\[" -and $line -notmatch "^\[Startup\]") { $startup = $false; continue }
+            if ($line -match '^\[Startup\]') { $startup = $true; continue }
+            if ($line -match '^\[' -and $line -notmatch '^\[Startup\]') { $startup = $false; continue }
             if ($startup -and $line -match "^(\d+)CmdLine=") {
                 $idx = [int]$Matches[1]; if ($idx -gt $maxIndex) { $maxIndex = $idx }
             }
         }
         $nextIndex = $maxIndex + 1
         $newBlock = "${nextIndex}CmdLine=powershell.exe`r`n${nextIndex}Parameters=-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`"`r`n"
-        $content = $content -replace "(\[Startup\]\r?\n)", "`$1$newBlock"
+        $content = $content -replace '(\[Startup\]\r?\n)', "`$1$newBlock"
     } else {
         $content += "`r`n[Startup]`r`n0CmdLine=powershell.exe`r`n0Parameters=-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`"`r`n"
     }

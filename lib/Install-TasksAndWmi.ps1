@@ -2,6 +2,8 @@
 #Requires -Version 5.1
 
 function Invoke-InstallTasksAndWmi {
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$repoScripts = Join-Path $repoRoot 'scripts'
 Write-Step "STEP 11 - MAIN SCHEDULED TASK (60s boot delay)"
 # ================================================================
 Remove-TaskFully $TASK_MONITOR
@@ -23,7 +25,17 @@ if (Register-TaskViaSchtasks $TASK_REPAIR $repTr '/SC MINUTE /MO 2') {
 # ================================================================
 Write-Step "STEP 12b - POST-REBOOT VERIFY TASK (5min boot delay)"
 # ================================================================
-$repoScripts = Join-Path $PSScriptRoot 'scripts'
+$installScripts = Join-Path $INSTALL_DIR 'scripts'
+New-Item -ItemType Directory -Path $installScripts -Force | Out-Null
+foreach ($auditScript in @('post-reboot-verify.ps1', 'safe-live-verify.ps1', 'security-audit.ps1')) {
+    $src = Join-Path $repoScripts $auditScript
+    if (Test-Path $src) {
+        Copy-Item $src (Join-Path $installScripts $auditScript) -Force
+        OK "$auditScript deployed to $installScripts"
+    } else {
+        WARN "$auditScript source missing in repo scripts/"
+    }
+}
 $rebootVerifySrc = Join-Path $repoScripts 'post-reboot-verify.ps1'
 if (Test-Path $rebootVerifySrc) {
     Copy-Item $rebootVerifySrc $REBOOT_VERIFY_PS1 -Force
@@ -42,8 +54,8 @@ Write-Step "STEP 12c - INTERNET WATCHDOG TASK (every 3min)"
 # ================================================================
 Remove-TaskFully $TASK_WATCHDOG
 $wdTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WATCHDOG_PS1`""
-if (Register-TaskViaSchtasks $TASK_WATCHDOG $wdTr '/SC MINUTE /MO 1') {
-    OK "WG-InternetWatchdog registered - every 1min"
+if (Register-TaskViaSchtasks $TASK_WATCHDOG $wdTr '/SC MINUTE /MO 3') {
+    OK "WG-InternetWatchdog registered - every 3min"
 } else { WARN "WG-InternetWatchdog task registration failed" }
 
 # ================================================================
@@ -65,7 +77,7 @@ try {
 New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       $WG_KS_VERSION                      -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "EnableFailsafe" ([int]$script:EnableFailsafe) -Type DWord -Force
-Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  (Join-Path $PSScriptRoot 'scripts')   -Force
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  $installScripts   -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TunnelName"   $TUNNEL_NAME                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
@@ -74,7 +86,7 @@ if ($taskXml) {
     $taskXml | Set-Content "$INSTALL_DIR\WG-KillSwitch-backup.xml" -Encoding UTF8 -Force
     $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($taskXml))
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  (Join-Path $PSScriptRoot 'scripts') -Force
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  $installScripts -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RebootVerifyPath" $REBOOT_VERIFY_PS1             -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force

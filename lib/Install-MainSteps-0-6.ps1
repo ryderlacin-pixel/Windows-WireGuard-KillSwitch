@@ -48,7 +48,7 @@ if ($CUSTOM_MODE) {
     } else {
         $TUNNEL_NAME = [System.IO.Path]::GetFileNameWithoutExtension($CONFIG)
     }
-    $TUNNEL_SVC = "WireGuardTunnel`$$TUNNEL_NAME"
+    $TUNNEL_SVC = 'WireGuardTunnel$' + $TUNNEL_NAME
     $parsed = Get-EndpointFromConfig
     if ($CustomEndpointIP -eq "" -and $parsed) {
         $CustomEndpointIP = $parsed.IP
@@ -240,11 +240,11 @@ foreach ($k in $allRules) {
 
 Invoke-SafeNetsh 'netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound' 'reset firewall policy'
 # Keep tunnel alive during upgrade — reinstall only in STEP 5 if down
-Remove-Item "$INSTALL_DIR\repair.lock"        -Force -EA SilentlyContinue
-Remove-Item "$INSTALL_DIR\onarim.lock"        -Force -EA SilentlyContinue
-Remove-Item "$INSTALL_DIR\onarim.ps1"         -Force -EA SilentlyContinue
-Remove-Item "$INSTALL_DIR\servis-monitor.ps1" -Force -EA SilentlyContinue
-Remove-Item "$INSTALL_DIR\wmi-onarim.ps1"     -Force -EA SilentlyContinue
+if (Test-Path $INSTALL_DIR) {
+    foreach ($legacy in @('repair.lock', 'onarim.lock', 'onarim.ps1', 'servis-monitor.ps1', 'wmi-onarim.ps1')) {
+        Remove-Item (Join-Path $INSTALL_DIR $legacy) -Force -EA SilentlyContinue
+    }
+}
 if (Test-Path $LOG) { attrib -H -S $LOG 2>$null | Out-Null }
 Get-ChildItem $INSTALL_DIR -File -EA SilentlyContinue | ForEach-Object { attrib -H -S $_.FullName 2>$null | Out-Null }
 OK "Cleanup done"
@@ -294,7 +294,8 @@ Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-DNS-Block" dir=ou
 Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-DNS-Block-TCP" dir=out action=block protocol=TCP remoteport=53 enable=no' 'DNS TCP block'
 Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes' 'WireGuard EXE'
 if (Test-Path $DNSCRYPT_EXE) {
-    Invoke-SafeNetsh "netsh advfirewall firewall add rule name=`"KS-Dnscrypt-EXE`" dir=out action=allow program=`"$DNSCRYPT_EXE`" enable=yes" 'dnscrypt EXE'
+    $dnscryptRule = "netsh advfirewall firewall add rule name=""KS-Dnscrypt-EXE"" dir=out action=allow program=""$DNSCRYPT_EXE"" enable=yes"
+    Invoke-SafeNetsh $dnscryptRule 'dnscrypt EXE'
 }
 Write-Info "Server IPs: $serverIPs"
 if (-not $script:InstallDryRun) {

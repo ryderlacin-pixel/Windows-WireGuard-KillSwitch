@@ -23,7 +23,8 @@ function Get-ScriptsDir {
         if ($reg.ScriptsPath -and (Test-Path $reg.ScriptsPath)) { return [string]$reg.ScriptsPath }
     } catch {}
     $candidates = @(
-        'C:\Users\seyit\Windows-WireGuard-KillSwitch\scripts',
+        'C:\WireGuard\scripts',
+        (Join-Path (Split-Path 'C:\WireGuard\killswitch.log' -Parent) 'scripts'),
         (Join-Path $env:ProgramData 'WGKillSwitchGuard\scripts')
     )
     foreach ($p in $candidates) { if (Test-Path $p) { return $p } }
