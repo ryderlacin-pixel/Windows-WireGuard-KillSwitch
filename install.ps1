@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v12.2)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v12.3)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v12.3: kurtar2 = full unbrick (stops layers, disables tasks, firewall recovery like Downloads KURTAR2);
+#   UnbrickUntil cooldown stops monitor/repair re-blocking; watchdog auto-invokes kurtar2.
 # - v12.2: tunnel-down debounce (3x/6s before block); repair uses rule-exists not rule-enabled for DNS;
 #   dedupes duplicate firewall rules; watchdog every 1min; repair syncs DNS state after firewall repair.
 # - v12.1: DNS leak rules toggle with block state (fixes internet-open DNS brick); Test-Dns in SafeToOpen;
@@ -58,7 +60,7 @@ param(
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '12.2'
+$WG_KS_VERSION = '12.3'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -81,6 +83,8 @@ $TASK_REBOOT_VERIFY = "WG-RebootVerify"
 $TASK_WATCHDOG    = "WG-InternetWatchdog"
 $REBOOT_VERIFY_PS1  = "$INSTALL_DIR\post-reboot-verify.ps1"
 $WATCHDOG_PS1     = "$INSTALL_DIR\internet-watchdog.ps1"
+$RESUME_UNBRICK_PS1 = "$INSTALL_DIR\resume-after-unbrick.ps1"
+$TASK_UNBRICK_RESUME = "WG-UnbrickResume"
 $WG_SVC_NAME  = "WGKillSwitchSvc"
 $WMI_FILTER   = "WGMonitorFilter"
 $WMI_CONSUMER = "WGMonitorConsumer"
@@ -344,16 +348,33 @@ function Install-WmiSubscription {
 
 function Write-KurtarScript {
     $kurtarTunnelSvc = $TUNNEL_SVC
-    $kurtarContent = @"
-# WG Kill Switch - KURTAR v$WG_KS_VERSION (emergency restore, works 100% offline)
+    $ksRuleList = @(
+        'KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out',
+        'KS-Block-IPv6-Out','KS-Block-IPv6-In','KS-LAN-Out','KS-LAN-In','KS-DHCP-Out','KS-DHCP-In',
+        'KS-WARP-Server-Out','KS-Loopback-Out','KS-Loopback-In','KS-DNS-Allow','KS-DNS-Block','KS-DNS-Block-TCP',
+        'KS-WireGuard-EXE','KS-WireGuard-Tunnel-SVC'
+    ) -join "','"
+    $kurtar2Content = @"
+# WG Kill Switch - KURTAR2 v$WG_KS_VERSION (FULL unbrick - matches Downloads KURTAR2 logic, non-interactive)
 #Requires -RunAsAdministrator
+param([switch]`$FromAuto)
 `$TUNNEL_SVC  = '$kurtarTunnelSvc'
 `$TUNNEL_NAME = '$TUNNEL_NAME'
 `$CONFIG      = '$CONFIG'
 `$WG_EXE      = '$WG_EXE'
 `$INSTALL_LOCK = '$INSTALL_LOCK'
 `$LOG         = '$LOG'
+`$REG_KEY     = 'HKLM:\SOFTWARE\WGKillSwitch'
+`$UNBRICK_MIN = 30
+`$KS_RULES    = @('$ksRuleList')
+`$WG_TASKS    = @('WG-KillSwitch','WG-RepairTask','WG-InternetWatchdog','WG-RebootVerify')
 `$ErrorActionPreference = 'Continue'
+
+function Log-K([string]`$m) {
+    `$line = "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR2] `$m"
+    Add-Content `$LOG `$line -Encoding UTF8 -EA SilentlyContinue
+    if (-not `$FromAuto) { Write-Host `$m -ForegroundColor Cyan }
+}
 
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
@@ -366,13 +387,10 @@ function Try-ReinstallTunnel {
         if (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING') { return `$true }
         `$mux = New-Object System.Threading.Mutex(`$false, 'Global\WGTunnelInstallMutex')
         if (-not (Wait-NamedMutex `$mux 120000)) {
-            Write-Host '[!!] Tunnel mutex timeout' -ForegroundColor Yellow
             return (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
         }
+        if (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING') { return `$true }
         Get-Process -Name 'wireguard' -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
-        `$wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='`$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
-        if (`$wgSvcPid -and `$wgSvcPid -gt 0) { Stop-Process -Id `$wgSvcPid -Force -EA SilentlyContinue }
-        Start-Sleep -Seconds 2
         for (`$attempt = 1; `$attempt -le 2; `$attempt++) {
             & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
             Start-Sleep -Seconds 4
@@ -390,49 +408,141 @@ function Try-ReinstallTunnel {
     }
 }
 
-Write-Host '=== WG KURTAR v$WG_KS_VERSION (emergency restore) ===' -ForegroundColor Cyan
-foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
-    netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
-}
-foreach (`$r in @('KS-DNS-Block','KS-DNS-Block-TCP')) {
-    netsh advfirewall firewall set rule name="`$r" new enable=no 2>`$null | Out-Null
-}
-netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
-Remove-Item `$INSTALL_LOCK -Force -EA SilentlyContinue
-Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
-Clear-DnsClientCache -EA SilentlyContinue
-if (-not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
-    Write-Host '[-->] Tunnel down - reinstalling (mutex)...' -ForegroundColor Yellow
-    if ((Test-Path `$WG_EXE) -and (Test-Path `$CONFIG)) {
-        `$ok = Try-ReinstallTunnel
-        if (-not `$ok) {
-            Write-Host '[-->] First attempt failed - retrying...' -ForegroundColor Yellow
-            Start-Sleep -Seconds 5
-            `$ok = Try-ReinstallTunnel
-        }
+function Remove-AllKsRules {
+    foreach (`$r in `$KS_RULES) {
+        do {
+            netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
+            `$left = netsh advfirewall firewall show rule name="`$r" 2>`$null | Out-String
+        } while (`$left -notmatch 'No rules match')
     }
 }
+
+if (-not `$FromAuto) {
+    Write-Host '`n========================================' -ForegroundColor Red
+    Write-Host ' WIREGUARD KILL SWITCH - TAM KURTARMA' -ForegroundColor Yellow
+    Write-Host '========================================`n' -ForegroundColor Red
+}
+
+Log-K 'FULL unbrick started'
+
+# Cooldown: monitor/repair must not re-block for UNBRICK_MIN minutes
+New-Item -Path `$REG_KEY -Force | Out-Null
+Set-ItemProperty `$REG_KEY 'UnbrickUntil' (Get-Date).AddMinutes(`$UNBRICK_MIN).ToString('o') -Force
+Remove-Item `$INSTALL_LOCK -Force -EA SilentlyContinue
+Remove-ItemProperty `$REG_KEY 'InstallInProgress' -EA SilentlyContinue
+
+# Stop kill-switch service only (keep WireGuard tunnel service)
+Log-K 'Stopping WGKillSwitchSvc'
+Stop-Service 'WGKillSwitchSvc' -Force -EA SilentlyContinue
+& sc.exe stop 'WGKillSwitchSvc' 2>`$null | Out-Null
+
+# Disable scheduled tasks so layers cannot respawn and re-block
+foreach (`$tn in `$WG_TASKS) {
+    Disable-ScheduledTask -TaskName `$tn -EA SilentlyContinue | Out-Null
+    Log-K "Task disabled: `$tn"
+}
+
+# Kill monitor/repair/watchdog processes (the #1 reason gentle kurtar fails)
+foreach (`$proc in (Get-Process powershell,pwsh -EA SilentlyContinue)) {
+    if (`$proc.Id -eq `$PID) { continue }
+    try {
+        `$cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=`$(`$proc.Id)" -EA Stop).CommandLine
+        if (`$cmd -match 'monitor\.ps1|repair\.ps1|service-monitor|wmi-repair|internet-watchdog|anti-tamper') {
+            Stop-Process -Id `$proc.Id -Force -EA SilentlyContinue
+            Log-K "Killed PID `$(`$proc.Id)"
+        }
+    } catch {}
+}
+
+# Remove all kill-switch firewall rules
+Log-K 'Removing all KS firewall rules'
+Remove-AllKsRules
+netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
+
+# DNS reset (like Downloads KURTAR2)
+Clear-DnsClientCache -EA SilentlyContinue
+Get-NetAdapter -EA SilentlyContinue | Where-Object { `$_.Status -eq 'Up' } | ForEach-Object {
+    Set-DnsClientServerAddress -InterfaceIndex `$_.InterfaceIndex -ResetServerAddresses -EA SilentlyContinue
+}
+
+# Tunnel: keep/restart if down (do NOT delete WireGuard tunnel service)
+if (-not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
+    Log-K 'Tunnel down - reinstalling'
+    Try-ReinstallTunnel | Out-Null
+}
+
+Start-Sleep -Seconds 2
+`$ping = Test-Connection 8.8.8.8 -Count 2 -Quiet
+if (-not `$ping) {
+    Log-K 'Still no ping - turning firewall OFF (Downloads KURTAR2 step)'
+    netsh advfirewall set allprofiles state off 2>`$null | Out-Null
+    Start-Sleep -Seconds 2
+    `$ping = Test-Connection 8.8.8.8 -Count 2 -Quiet
+}
+
 `$running = (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
-Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR] Emergency restore v$WG_KS_VERSION - tunnel=`$running" -Encoding UTF8 -EA SilentlyContinue
-Write-Host "[OK] Internet restored (tunnel=`$running)" -ForegroundColor Green
-Write-Host "     Re-run install.ps1 when ready to re-apply kill switch." -ForegroundColor Gray
+Log-K "Done tunnel=`$running ping=`$ping"
+
+# Schedule protection resume (re-enable tasks + firewall ON)
+`$resume = '$RESUME_UNBRICK_PS1'
+Remove-ScheduledTask -TaskName 'WG-UnbrickResume' -Confirm:`$false -EA SilentlyContinue
+if (Test-Path `$resume) {
+    `$act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"`$resume`""
+    `$trg = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(`$UNBRICK_MIN)
+    `$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    `$pri = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName 'WG-UnbrickResume' -Action `$act -Trigger `$trg -Settings `$set -Principal `$pri -Force | Out-Null
+    Log-K "Resume scheduled in `$UNBRICK_MIN min"
+}
+
+if (-not `$FromAuto) {
+    if (`$ping) { Write-Host '`n [BASARILI] INTERNET CALISIYOR!' -ForegroundColor Green }
+    else { Write-Host '`n [UYARI] Hala sorun olabilir - bilgisayari yeniden baslatin.' -ForegroundColor Yellow }
+}
 "@
+    $kurtarContent = @"
+# WG Kill Switch - KURTAR v$WG_KS_VERSION (quick - calls full kurtar2)
+#Requires -RunAsAdministrator
+& '$KURTAR2_PS1' @PSBoundParameters
+"@
+    $resumeContent = @"
+# Resume after unbrick v$WG_KS_VERSION (auto-generated)
+#Requires -RunAsAdministrator
+`$LOG = '$LOG'
+`$REG_KEY = 'HKLM:\SOFTWARE\WGKillSwitch'
+`$REPAIR = '$REPAIR_PS1'
+Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [RESUME] Unbrick cooldown ending" -Encoding UTF8 -EA SilentlyContinue
+Remove-ItemProperty `$REG_KEY 'UnbrickUntil' -EA SilentlyContinue
+netsh advfirewall set allprofiles state on 2>`$null | Out-Null
+netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
+foreach (`$tn in @('WG-KillSwitch','WG-RepairTask','WG-InternetWatchdog','WG-RebootVerify')) {
+    Enable-ScheduledTask -TaskName `$tn -EA SilentlyContinue | Out-Null
+}
+& sc.exe start 'WGKillSwitchSvc' 2>`$null | Out-Null
+if (Test-Path `$REPAIR) {
+    Start-Process -FilePath (Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$REPAIR) `
+        -WindowStyle Hidden
+}
+Remove-ScheduledTask -TaskName 'WG-UnbrickResume' -Confirm:`$false -EA SilentlyContinue
+"@
+    Set-Content $KURTAR2_PS1 $kurtar2Content -Encoding UTF8 -Force
     Set-Content $KURTAR_PS1 $kurtarContent -Encoding UTF8 -Force
-    Copy-Item $KURTAR_PS1 $KURTAR2_PS1 -Force
+    Set-Content $RESUME_UNBRICK_PS1 $resumeContent -Encoding UTF8 -Force
     attrib -H -S $KURTAR_PS1 2>$null | Out-Null
     attrib -H -S $KURTAR2_PS1 2>$null | Out-Null
     @"
 @echo off
 title WireGuard Kill Switch - KURTAR
 echo.
-echo  Acil internet kurtarma (offline calisir)
+echo  TAM acil kurtarma (kurtar2 - offline calisir)
 echo.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$KURTAR_PS1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$KURTAR2_PS1"
 echo.
 pause
 "@ | Set-Content $KURTAR_BAT -Encoding ASCII -Force
     attrib -H -S $KURTAR_BAT 2>$null | Out-Null
-    OK "Emergency rescue: $KURTAR_BAT + $KURTAR2_PS1"
+    OK "Emergency rescue: $KURTAR_BAT -> kurtar2.ps1 + resume-after-unbrick.ps1"
 }
 
 function Update-GpoScriptsIni($iniPath, $scriptPath) {
@@ -475,7 +585,7 @@ function Write-GuardBackups {
     Unlock-GuardDirForWrite
     $guardFiles = @(
         $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
-        $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1
+        $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $RESUME_UNBRICK_PS1, $KURTAR2_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1
     )
     foreach ($f in $guardFiles) {
         if (Test-Path $f) {
@@ -993,6 +1103,14 @@ function Test-InstallInProgress {
     } catch { return `$false }
 }
 
+function Test-UnbrickActive {
+    try {
+        `$reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name UnbrickUntil -EA SilentlyContinue
+        if (`$reg.UnbrickUntil -and (Get-Date) -lt [datetime]`$reg.UnbrickUntil) { return `$true }
+    } catch {}
+    return `$false
+}
+
 function Test-ServerRulePresent {
     try {
         `$out = netsh advfirewall firewall show rule name="KS-WARP-Server-Out" 2>`$null
@@ -1120,19 +1238,18 @@ function Try-ReinstallTunnel {
 }
 
 function Invoke-EmergencyUnbrick {
-    Log "EMERGENCY UNBRICK: removing blocks + aggressive tunnel retry"
+    Log "EMERGENCY UNBRICK: invoking kurtar2.ps1 (full unbrick)"
+    `$k2 = 'C:\WireGuard\kurtar2.ps1'
+    if (Test-Path `$k2) {
+        Start-Process -FilePath (Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+            -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$k2,'-FromAuto') `
+            -WindowStyle Hidden
+        return `$true
+    }
     Disable-Block
+    Disable-DnsLeakProtection
     Clear-DnsClientCache -EA SilentlyContinue
-    `$up = Try-ReinstallTunnel
-    if (`$up -and (Test-SafeToOpen)) {
-        Log "EMERGENCY UNBRICK: tunnel + internet OK"
-        return `$true
-    }
-    if (Test-Internet) {
-        Log "EMERGENCY UNBRICK: direct internet open (tunnel may still be down)"
-        return `$true
-    }
-    Log "EMERGENCY UNBRICK: still unhealthy - run C:\WireGuard\kurtar.bat"
+    Log "EMERGENCY UNBRICK: kurtar2.ps1 missing - run C:\WireGuard\kurtar.bat"
     return `$false
 }
 
@@ -1226,6 +1343,17 @@ if (Test-SafeToOpen) {
 while (`$true) {
     if (-not `$startupRecovery) { Start-Sleep -Seconds 2 }
     `$startupRecovery = `$false
+    if (Test-UnbrickActive) {
+        Disable-Block
+        Disable-DnsLeakProtection
+        Clear-DnsClientCache -EA SilentlyContinue
+        if (`$state -ne 'open') {
+            Log "Unbrick cooldown - holding internet open (no re-block)"
+            `$state = 'open'; `$wasOpen = `$true
+        }
+        Start-Sleep -Seconds 30
+        continue
+    }
     Ensure-ServerRule
     `$script:dedupeTick++
     if (`$script:dedupeTick -ge 15) {
@@ -1447,6 +1575,14 @@ function Test-InstallInProgress {
         $reg = Get-ItemProperty $REG_KEY -EA SilentlyContinue
         return ($reg.InstallInProgress -eq 1)
     } catch { return $false }
+}
+
+function Test-UnbrickActive {
+    try {
+        $reg = Get-ItemProperty $REG_KEY -Name UnbrickUntil -EA SilentlyContinue
+        if ($reg.UnbrickUntil -and (Get-Date) -lt [datetime]$reg.UnbrickUntil) { return $true }
+    } catch {}
+    return $false
 }
 
 function Test-FwRuleEnabled([string]$name) {
@@ -1678,6 +1814,14 @@ $PID | Set-Content $LOCK -Force -EA SilentlyContinue
 try {
     if (Test-Path $LOG) { attrib -H -S $LOG 2>$null | Out-Null }
 
+    if (Test-UnbrickActive) {
+        Disable-Block
+        Disable-DnsLeakProtection
+        Clear-DnsClientCache -EA SilentlyContinue
+        Log "Unbrick cooldown - repair skipped (no re-block)"
+        exit 0
+    }
+
     $atScript = 'C:\WireGuard\anti-tamper.ps1'
     if (Test-Path $atScript) { & $atScript -NoChainRepair }
 
@@ -1776,26 +1920,22 @@ Write-Step "STEP 8b - INTERNET WATCHDOG SCRIPT"
 $watchdogKsVersion = $WG_KS_VERSION
 $watchdogContent = @"
 # Internet Watchdog v$watchdogKsVersion (auto-generated by install.ps1)
-# Auto-unbrick: stuck blocks, DNS brick while tunnel healthy, prolonged outage
-`$TUNNEL_SVC = '$TUNNEL_SVC'
+# Invokes kurtar2.ps1 when internet/DNS down (same as Downloads KURTAR2)
 `$LOG = '$LOG'
-`$STUCK_FILE = 'C:\WireGuard\watchdog-stuck.count'
+`$KURTAR2 = '$KURTAR2_PS1'
+`$REG_KEY = 'HKLM:\SOFTWARE\WGKillSwitch'
+`$LAST_RUN = 'C:\WireGuard\watchdog-last-kurtar2.txt'
 `$ErrorActionPreference = 'Continue'
 
-function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
-    try { return `$Mutex.WaitOne(`$TimeoutMs) }
-    catch [System.Threading.AbandonedMutexException] { return `$true }
-}
 function Log([string]`$m) {
-    `$mutex = `$null
-    try {
-        `$mutex = New-Object System.Threading.Mutex(`$false, 'Global\WGKillSwitchLog')
-        if (-not (Wait-NamedMutex `$mutex 1500)) { return }
-        Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WATCHDOG] `$m" -Encoding UTF8 -EA SilentlyContinue
-    } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
+    Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WATCHDOG] `$m" -Encoding UTF8 -EA SilentlyContinue
 }
-function Test-TunnelRunning {
-    return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING'))
+function Test-UnbrickActive {
+    try {
+        `$reg = Get-ItemProperty `$REG_KEY -Name UnbrickUntil -EA SilentlyContinue
+        if (`$reg.UnbrickUntil -and (Get-Date) -lt [datetime]`$reg.UnbrickUntil) { return `$true }
+    } catch {}
+    return `$false
 }
 function Test-TcpHost([string]`$HostName, [int]`$Port, [int]`$TimeoutMs = 4000) {
     `$tcp = `$null
@@ -1821,74 +1961,28 @@ function Test-Dns {
         return (`$r -and `$r.Count -gt 0)
     } catch { return `$false }
 }
-function Test-BlockRulePresent {
-    `$o = netsh advfirewall firewall show rule name="KS-Block-WiFi-Out" 2>`$null | Out-String
-    return (`$o -match 'Enabled:\s+Yes')
-}
-function Test-DnsBlockEnabled {
-    `$o = netsh advfirewall firewall show rule name="KS-DNS-Block" 2>`$null | Out-String
-    return (`$o -match 'Enabled:\s+Yes')
-}
-function Disable-DnsLeakProtection {
-    netsh advfirewall firewall set rule name="KS-DNS-Block" new enable=no 2>`$null | Out-Null
-    netsh advfirewall firewall set rule name="KS-DNS-Block-TCP" new enable=no 2>`$null | Out-Null
-}
-function Remove-OutboundBlocks {
-    foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
-        netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
-    }
-    Disable-DnsLeakProtection
-}
 
-`$blocked = Test-BlockRulePresent
-`$tunnel = Test-TunnelRunning
+if (Test-UnbrickActive) { exit 0 }
+
 `$tcpOK = Test-Internet
 `$dnsOK = Test-Dns
-`$healthy = `$tunnel -and `$tcpOK -and `$dnsOK
+if (`$tcpOK -and `$dnsOK) { exit 0 }
 
-if (`$healthy -and (`$blocked -or (Test-DnsBlockEnabled))) {
-    Log "Healthy but blocks/DNS-leak active - auto-unbrick"
-    Remove-OutboundBlocks
-    Clear-DnsClientCache -EA SilentlyContinue
-    Set-Content `$STUCK_FILE '0' -Force -EA SilentlyContinue
-    exit 0
+# Throttle: max one kurtar2 per 5 minutes from watchdog
+if (Test-Path `$LAST_RUN) {
+    try {
+        `$last = [datetime](Get-Content `$LAST_RUN -EA Stop | Select-Object -First 1)
+        if ((Get-Date) -lt `$last.AddMinutes(5)) { exit 0 }
+    } catch {}
 }
 
-if (`$tunnel -and `$tcpOK -and -not `$dnsOK -and (Test-DnsBlockEnabled)) {
-    Log "DNS brick detected (tunnel+TCP OK) - disabling DNS leak rules"
-    Disable-DnsLeakProtection
-    Clear-DnsClientCache -EA SilentlyContinue
-    Set-Content `$STUCK_FILE '0' -Force -EA SilentlyContinue
-    exit 0
+Log "Internet/DNS down (tcp=`$tcpOK dns=`$dnsOK) - invoking kurtar2.ps1"
+Set-Content `$LAST_RUN (Get-Date).ToString('o') -Force -EA SilentlyContinue
+if (Test-Path `$KURTAR2) {
+    & powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `$KURTAR2 -FromAuto
+} else {
+    Log "kurtar2.ps1 missing at `$KURTAR2"
 }
-
-if (`$blocked -and -not `$healthy) {
-    `$count = 0
-    if (Test-Path `$STUCK_FILE) {
-        try { `$count = [int](Get-Content `$STUCK_FILE -EA Stop | Select-Object -First 1) } catch {}
-    }
-    `$count++
-    Set-Content `$STUCK_FILE "`$count" -Force -EA SilentlyContinue
-    if (`$count -ge 2) {
-        Log "Stuck `$count cycles with blocks - emergency unbrick"
-        Remove-OutboundBlocks
-        Clear-DnsClientCache -EA SilentlyContinue
-        if (-not `$tunnel) {
-            `$repair = 'C:\WireGuard\repair.ps1'
-            if (Test-Path `$repair) {
-                Start-Process -FilePath (Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-                    -ArgumentList @('-NonInteractive','-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',`$repair) `
-                    -WindowStyle Hidden
-            }
-        }
-        Set-Content `$STUCK_FILE '0' -Force -EA SilentlyContinue
-    } else {
-        Log "Unhealthy with blocks (stuck count=`$count)"
-    }
-    exit 0
-}
-
-Set-Content `$STUCK_FILE '0' -Force -EA SilentlyContinue
 "@
 Set-Content $WATCHDOG_PS1 $watchdogContent -Encoding UTF8 -Force
 OK "internet-watchdog.ps1 written"
