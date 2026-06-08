@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.3)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.4)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v13.4: privacy hardening — cookies/tracking/fingerprint + Windows telemetry/ads/cloud;
+#   privacy-hardening-guard.ps1 re-applied by repair/vault (webrtc forwarder kept).
 # - v13.3: system-level WebRTC leak guard — Chromium/Brave/Edge HKLM policies + Firefox
 #   policies.json; webrtc-leak-guard.ps1 re-applied by repair/anti-tamper vault.
 # - v13.2: kurtar.bat/ps1/kurtar2 removed — protection never torn down; watchdog/monitor use
@@ -69,7 +71,7 @@ param(
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '13.3'
+$WG_KS_VERSION = '13.4'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -104,6 +106,7 @@ $INSTALL_LOCK = "$INSTALL_DIR\install.inprogress"
 $GUARD_DIR    = 'C:\ProgramData\WGKillSwitchGuard'
 $ANTI_TAMPER_PS1 = "$INSTALL_DIR\anti-tamper.ps1"
 $WEBRTC_GUARD_PS1 = "$INSTALL_DIR\webrtc-leak-guard.ps1"
+$PRIVACY_GUARD_PS1 = "$INSTALL_DIR\privacy-hardening-guard.ps1"
 
 # -- Custom mode (full validation in STEP 0) --
 $CUSTOM_MODE = ($CustomConfig -ne "")
@@ -185,34 +188,92 @@ function Log([string]$Message) {
     }
 }
 
+$script:CimShort = $null
+function Get-ShortCimSession {
+    if ($script:CimShort) { return $script:CimShort }
+    try {
+        $opt = New-CimSessionOption -OperationTimeoutSec 8
+        $script:CimShort = New-CimSession -SessionOption $opt -ErrorAction Stop
+    } catch { $script:CimShort = $null }
+    return $script:CimShort
+}
+
+function Invoke-Schtasks($args, [int]$timeoutSec = 5) {
+    try {
+        $p = Start-Process -FilePath 'schtasks.exe' -ArgumentList $args -PassThru -NoNewWindow -Wait:$false
+        $deadline = (Get-Date).AddSeconds($timeoutSec)
+        while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+        if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(2000) }
+    } catch {}
+}
+
+function Invoke-ScCommand([string[]]$args, [int]$timeoutSec = 10) {
+    try {
+        $p = Start-Process -FilePath 'sc.exe' -ArgumentList $args -PassThru -NoNewWindow -Wait:$false
+        $deadline = (Get-Date).AddSeconds($timeoutSec)
+        while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+        if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(2000) }
+    } catch {}
+}
+
 function Remove-TaskFully($name) {
-    schtasks /End    /TN "\$name" /F 2>$null | Out-Null
-    schtasks /Delete /TN "\$name" /F 2>$null | Out-Null
-    Stop-ScheduledTask       -TaskName $name -EA SilentlyContinue
-    Unregister-ScheduledTask -TaskName $name -Confirm:$false -EA SilentlyContinue
+    $tn = '\' + $name
+    Invoke-Schtasks @('/End', '/TN', $tn, '/F')
+    Invoke-Schtasks @('/Delete', '/TN', $tn, '/F')
+}
+
+function Register-TaskViaSchtasks(
+    [string]$Name,
+    [string]$Command,
+    [string]$ScheduleArgs,
+    [int]$TimeoutSec = 45
+) {
+    $tn = '\' + $Name
+    $args = @('/Create', '/TN', $tn, '/TR', "`"$Command`"", '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F') + $ScheduleArgs.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+    try {
+        $p = Start-Process -FilePath 'schtasks.exe' -ArgumentList $args -PassThru -NoNewWindow -Wait:$false
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+        if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(2000) }
+    } catch {}
+    schtasks /Query /TN $tn 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Export-TaskXmlSafe([string]$Name, [int]$TimeoutSec = 20) {
+    $tn = '\' + $Name
+    $out = Join-Path $env:TEMP "wg-task-$Name.xml"
+    try {
+        $p = Start-Process -FilePath 'schtasks.exe' -ArgumentList @('/Query', '/TN', $tn, '/XML') -PassThru -NoNewWindow -Wait:$false -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        while (-not $p.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+        if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(2000); return $null }
+        if (Test-Path $out) {
+            $xml = Get-Content $out -Raw -Encoding UTF8 -EA SilentlyContinue
+            Remove-Item $out, "$out.err" -Force -EA SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace($xml)) { return $xml }
+        }
+    } catch {}
+    Remove-Item $out, "$out.err" -Force -EA SilentlyContinue
+    return $null
+}
+
+function Test-TunnelServiceRunning {
+    try {
+        $svc = Get-Service -Name $TUNNEL_SVC -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') { return $true }
+    } catch {}
+    return [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match 'RUNNING')
 }
 
 function Test-TunnelAdapterUp {
-    for ($try = 0; $try -lt 3; $try++) {
-        try {
-            foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
-                if ($a.Status -ne 'Up') { continue }
-                if ($a.Name -eq $TUNNEL_NAME -or $a.InterfaceDescription -match 'WireGuard') { return $true }
-            }
-        } catch {}
-        if ($try -lt 2) { Start-Sleep -Milliseconds 500 }
-    }
+    $ifaces = & netsh interface show interface 2>$null | Out-String
+    if ($ifaces -match 'WireGuard' -or $ifaces -match [regex]::Escape($TUNNEL_NAME)) { return $true }
     return $false
 }
 
 function Test-TunnelRunning {
-    $svcUp = $false
-    try {
-        $svc = Get-Service -Name $TUNNEL_SVC -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -eq 'Running') { $svcUp = $true }
-    } catch {}
-    if (-not $svcUp) { $svcUp = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING") }
-    if (-not $svcUp) { return $false }
+    if (-not (Test-TunnelServiceRunning)) { return $false }
     return (Test-TunnelAdapterUp)
 }
 
@@ -254,17 +315,31 @@ function Remove-InstallBlocks {
 
 function Restart-TunnelWithConfig {
     if (-not (Test-Path $CONFIG)) { return $false }
-    & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
-    Start-Sleep 2
-    & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
-    & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
+    if (Test-TunnelRunning) {
+        & sc.exe stop $TUNNEL_SVC 2>$null | Out-Null
+        Start-Sleep 2
+        & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
+        $waited = 0
+        while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 2; $waited += 2 }
+        return (Test-TunnelRunning)
+    }
+    $wgJob = Start-Job -ScriptBlock {
+        param($exe, $tn, $cfg, $svc)
+        & $exe /uninstalltunnelservice $tn 2>$null | Out-Null
+        Start-Sleep 2
+        & $exe /installtunnelservice $cfg 2>&1 | Out-Null
+        & sc.exe start $svc 2>$null | Out-Null
+    } -ArgumentList $WG_EXE, $TUNNEL_NAME, $CONFIG, $TUNNEL_SVC
+    $null = Wait-Job $wgJob -Timeout 45
+    if ($wgJob.State -eq 'Running') { Stop-Job $wgJob -EA SilentlyContinue; Remove-Job $wgJob -Force; return $false }
+    Remove-Job $wgJob -Force
     $waited = 0
     while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 2; $waited += 2 }
     return (Test-TunnelRunning)
 }
 
 function Ensure-TunnelForInstall {
-    if (Test-TunnelRunning) {
+    if (Test-TunnelServiceRunning) {
         OK "Tunnel already RUNNING - kept alive during upgrade"
         return $true
     }
@@ -276,11 +351,11 @@ function Ensure-TunnelForInstall {
         & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
         & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
         $waited = 0
-        while ($waited -lt 45 -and -not (Test-TunnelRunning)) {
+        while ($waited -lt 45 -and -not (Test-TunnelServiceRunning)) {
             Start-Sleep 3
             $waited += 3
         }
-        if (Test-TunnelRunning) {
+        if (Test-TunnelServiceRunning) {
             OK "Tunnel RUNNING (attempt $attempt, waited ${waited}s)"
             return $true
         }
@@ -318,36 +393,79 @@ function Remove-IPv6FromConfig {
 }
 
 function Disable-AllIPv6Bindings {
-    Get-NetAdapter -EA SilentlyContinue | Where-Object { $_.Status -ne 'Not Present' } |
-        ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -EA SilentlyContinue }
+    try {
+        $list = & netsh interface show interface 2>$null | Out-String
+        foreach ($line in ($list -split "`n")) {
+            if ($line -notmatch '^\s*Enabled\s+Connected') { continue }
+            $name = ($line -replace '^\s*\S+\s+\S+\s+\S+\s+', '').Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            & netsh interface ipv6 set interface "$name" disabled 2>$null | Out-Null
+        }
+    } catch {}
 }
 
-function Install-WebRtcLeakProtection {
-    $chromium = @(
+function Set-ChromiumPrivacyPolicies([string]$PolicyPath, [string]$Label) {
+    $props = @{
+        WebRtcIpHandlingPolicy               = @{ Type = 'String'; Value = 'default_public_interface_only' }
+        WebRtcLocalhostCandidateAllowed      = @{ Type = 'DWord';  Value = 0 }
+        BlockThirdPartyCookies               = @{ Type = 'DWord';  Value = 1 }
+        DefaultThirdPartyCookieSetting       = @{ Type = 'DWord';  Value = 1 }
+        EnableDoNotTrack                     = @{ Type = 'DWord';  Value = 1 }
+        MetricsReportingEnabled              = @{ Type = 'DWord';  Value = 0 }
+        DeviceMetricsReportingEnabled        = @{ Type = 'DWord';  Value = 0 }
+        PaymentMethodQueryEnabled            = @{ Type = 'DWord';  Value = 0 }
+        BrowserSignin                        = @{ Type = 'DWord';  Value = 0 }
+        SyncDisabled                         = @{ Type = 'DWord';  Value = 1 }
+        AutofillAddressEnabled               = @{ Type = 'DWord';  Value = 0 }
+        AutofillCreditCardEnabled            = @{ Type = 'DWord';  Value = 0 }
+        DefaultGeolocationSetting            = @{ Type = 'DWord';  Value = 2 }
+        SafeBrowsingExtendedReportingEnabled = @{ Type = 'DWord';  Value = 0 }
+        ChromeVariations                     = @{ Type = 'DWord';  Value = 0 }
+    }
+    if ($PolicyPath -match 'Microsoft\\Edge') {
+        $props['PersonalizationReportingEnabled'] = @{ Type = 'DWord'; Value = 0 }
+        $props['DiagnosticData'] = @{ Type = 'DWord'; Value = 0 }
+    }
+    New-Item -Path $PolicyPath -Force | Out-Null
+    foreach ($kv in $props.GetEnumerator()) {
+        if ($kv.Value.Type -eq 'String') {
+            Set-ItemProperty $PolicyPath $kv.Key $kv.Value.Value -Type String -Force
+        } else {
+            Set-ItemProperty $PolicyPath $kv.Key $kv.Value.Value -Type DWord -Force
+        }
+    }
+    OK "Browser privacy: $Label"
+}
+
+function Install-BrowserPrivacyPolicies {
+    foreach ($b in @(
         @{ Path = 'HKLM:\SOFTWARE\Policies\Google\Chrome'; Label = 'Chrome' },
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label = 'Edge' },
         @{ Path = 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label = 'Brave' }
-    )
-    foreach ($b in $chromium) {
-        try {
-            New-Item -Path $b.Path -Force | Out-Null
-            Set-ItemProperty $b.Path 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
-            Set-ItemProperty $b.Path 'WebRtcLocalhostCandidateAllowed' 0 -Type DWord -Force
-            OK "WebRTC policy: $($b.Label)"
-        } catch { WARN "WebRTC policy failed: $($b.Label)" }
+    )) {
+        try { Set-ChromiumPrivacyPolicies $b.Path $b.Label }
+        catch { WARN "Browser privacy failed: $($b.Label)" }
     }
     $ffPolicy = @'
 {
   "policies": {
+    "DisableTelemetry": true,
+    "DoNotTrack": true,
+    "Cookies": {
+      "Default": "reject-third-party",
+      "RejectThirdParty": true,
+      "Locked": true
+    },
     "Preferences": {
-      "media.peerconnection.ice.no_host": {
-        "Value": true,
-        "Status": "locked"
-      },
-      "media.peerconnection.ice.default_address_only": {
-        "Value": true,
-        "Status": "locked"
-      }
+      "media.peerconnection.ice.no_host": { "Value": true, "Status": "locked" },
+      "media.peerconnection.ice.default_address_only": { "Value": true, "Status": "locked" },
+      "privacy.resistFingerprinting": { "Value": true, "Status": "locked" },
+      "privacy.trackingprotection.enabled": { "Value": true, "Status": "locked" },
+      "privacy.trackingprotection.socialtracking.enabled": { "Value": true, "Status": "locked" },
+      "network.cookie.cookieBehavior": { "Value": 1, "Status": "locked" },
+      "geo.enabled": { "Value": false, "Status": "locked" },
+      "privacy.donottrackheader.enabled": { "Value": true, "Status": "locked" },
+      "browser.contentblocking.category": { "Value": "strict", "Status": "locked" }
     }
   }
 }
@@ -358,14 +476,64 @@ function Install-WebRtcLeakProtection {
         try {
             New-Item -Path $ffDir -ItemType Directory -Force | Out-Null
             $ffPolicy | Set-Content (Join-Path $ffDir 'policies.json') -Encoding UTF8 -Force
-            OK "WebRTC policy: Firefox ($ffRoot)"
-        } catch { WARN "WebRTC policy failed: Firefox ($ffRoot)" }
+            OK "Browser privacy: Firefox ($ffRoot)"
+        } catch { WARN "Browser privacy failed: Firefox ($ffRoot)" }
     }
 }
 
-function Test-WebRtcChromiumPolicy([string]$VendorPath) {
+function Install-WindowsTelemetryReduction {
+    $regBlocks = @(
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Props = @{
+            AllowTelemetry = 0; MaxTelemetryAllowed = 0; DoNotShowFeedbackNotifications = 1
+            DisableOneSettingsDownloads = 1; DisableTailoredExperiencesWithDiagnosticData = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'; Props = @{ AllowTelemetry = 0 }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo'; Props = @{ DisabledByGroupPolicy = 1 }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; Props = @{
+            PublishUserActivities = 0; EnableActivityFeed = 0; UploadUserActivities = 0
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors'; Props = @{
+            DisableLocation = 1; DisableLocationScripting = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Props = @{ AllowCortana = 0; AllowCloudSearch = 0 }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization'; Props = @{
+            RestrictImplicitInkCollection = 1; RestrictImplicitTextCollection = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Props = @{
+            DisableWindowsConsumerFeatures = 1; DisableCloudOptimizedContent = 1
+        }}
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'; Props = @{ LetAppsAccessAdvertisingId = 2 }}
+    )
+    foreach ($block in $regBlocks) {
+        try {
+            New-Item -Path $block.Path -Force | Out-Null
+            foreach ($kv in $block.Props.GetEnumerator()) {
+                Set-ItemProperty $block.Path $kv.Key $kv.Value -Type DWord -Force
+            }
+        } catch { WARN "Telemetry registry failed: $($block.Path)" }
+    }
+    foreach ($svc in @('DiagTrack', 'dmwappushservice')) {
+        & sc.exe config $svc start= disabled 2>$null | Out-Null
+        & sc.exe stop $svc 2>$null | Out-Null
+    }
+    OK 'Windows privacy: telemetry/ads/cloud reduced'
+}
+
+function Install-PrivacyHardening {
+    Install-BrowserPrivacyPolicies
+    Install-WindowsTelemetryReduction
+}
+
+function Test-PrivacyChromiumPolicy([string]$VendorPath) {
     $p = Get-ItemProperty "HKLM:\SOFTWARE\Policies\$VendorPath" -EA SilentlyContinue
-    return ($p -and $p.WebRtcIpHandlingPolicy -eq 'default_public_interface_only' -and $p.WebRtcLocalhostCandidateAllowed -eq 0)
+    return ($p -and $p.WebRtcIpHandlingPolicy -eq 'default_public_interface_only' -and
+            $p.WebRtcLocalhostCandidateAllowed -eq 0 -and $p.BlockThirdPartyCookies -eq 1 -and
+            $p.MetricsReportingEnabled -eq 0)
+}
+
+function Test-WindowsTelemetryReduced {
+    $p = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -EA SilentlyContinue
+    return ($p -and $p.AllowTelemetry -eq 0)
 }
 
 function Stop-AllMonitorProcs {
@@ -386,12 +554,16 @@ function Test-DelayedAutoStart {
 }
 
 function Install-WmiSubscription {
-    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
-        Where-Object { $_.Name -eq $WMI_FILTER } | Remove-CimInstance -EA SilentlyContinue
-    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -EA SilentlyContinue |
-        Where-Object { $_.Name -eq $WMI_CONSUMER } | Remove-CimInstance -EA SilentlyContinue
-    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -EA SilentlyContinue |
-        Where-Object { $_.Filter -like "*$WMI_FILTER*" } | Remove-CimInstance -EA SilentlyContinue
+    $cim = Get-ShortCimSession
+    $cimArgs = @{}
+    if ($cim) { $cimArgs['CimSession'] = $cim }
+    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='$WMI_FILTER'" @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='$WMI_CONSUMER'" @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    $bindFilter = "Filter = ""__EventFilter.Name='$WMI_FILTER'"""
+    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter $bindFilter @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
     $wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name='powershell.exe' OR TargetInstance.Name='pwsh.exe')"
     try {
         $filter = New-CimInstance -Namespace root\subscription -ClassName __EventFilter -Property @{
@@ -470,7 +642,8 @@ function Write-GuardBackups {
     Unlock-GuardDirForWrite
     $guardFiles = @(
         $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
-        $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1, $WEBRTC_GUARD_PS1
+        $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1,
+        $PRIVACY_GUARD_PS1, $WEBRTC_GUARD_PS1
     )
     foreach ($f in $guardFiles) {
         if (Test-Path $f) {
@@ -478,7 +651,7 @@ function Write-GuardBackups {
         }
     }
     foreach ($tn in @($TASK_MONITOR, $TASK_REPAIR, $TASK_REBOOT_VERIFY, $TASK_WATCHDOG)) {
-        $xml = Export-ScheduledTask -TaskName $tn -EA SilentlyContinue
+        $xml = Export-TaskXmlSafe $tn
         if ($xml) {
             $xml | Set-Content (Join-Path $GUARD_DIR "$tn.xml") -Encoding UTF8 -Force
         }
@@ -513,7 +686,7 @@ function Write-GuardBackups {
         @{ Name = 'TaskXMLRebootVerify'; Task = $TASK_REBOOT_VERIFY },
         @{ Name = 'TaskXMLWatchdog'; Task = $TASK_WATCHDOG }
     )) {
-        $tx = Export-ScheduledTask -TaskName $pair.Task -EA SilentlyContinue
+        $tx = Export-TaskXmlSafe $pair.Task
         if ($tx) {
             $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($tx))
             Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' $pair.Name $b64 -Force
@@ -558,20 +731,10 @@ function Get-ServerIPs {
             Write-Info "WARP endpoint from conf: $prefix"
         }
     } catch {}
-    try {
-        $resp = Invoke-RestMethod "https://api.cloudflare.com/client/v4/ips" -TimeoutSec 8 -EA Stop
-        if ($resp.success -and $resp.result.ipv4_cidrs) {
-            foreach ($cidr in $resp.result.ipv4_cidrs) {
-                if ($cidr -match "^(162\.159\.|104\.16\.)") {
-                    if (-not $ipList.Contains($cidr)) { $ipList.Add($cidr) }
-                }
-            }
-        }
-    } catch {}
     if ($ipList.Count -eq 0) {
-        @("162.159.192.0/24","162.159.193.0/24","162.159.195.0/24","104.16.0.0/13") |
+        @('162.159.192.0/24', '162.159.193.0/24', '162.159.195.0/24', '104.16.0.0/13') |
             ForEach-Object { $ipList.Add($_) }
-        WARN "Using WARP IP fallback"
+        Write-Info 'Using WARP IP fallback (hostname endpoint or offline)'
     }
     return ($ipList -join ",")
 }
@@ -691,7 +854,9 @@ if ($CUSTOM_MODE) {
         Write-Err "Config file invalid (missing PrivateKey or Endpoint)"; pause; exit 1
     }
     Remove-IPv6FromConfig
-    if (Restart-TunnelWithConfig) { OK "Tunnel reloaded with IPv4-only config" }
+    $svcRunning = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -match 'RUNNING')
+    if ($svcRunning) { OK "Tunnel RUNNING - kept alive (IPv4-only config active)" }
+    elseif (Restart-TunnelWithConfig) { OK "Tunnel reloaded with IPv4-only config" }
     else { WARN "Tunnel reload after IPv6 strip failed - STEP 5 will retry" }
 } # end WARP block
 
@@ -747,52 +912,60 @@ Write-Step "STEP 2b - PRE-CACHE + INSTALL LOCK (internet required)"
 $serverIPs = Get-ServerIPs
 $serverPort = Get-ServerPort
 Set-InstallLock
+Write-Info "Install lock set; clearing legacy rescue artifacts..."
 Remove-KurtarArtifacts
 OK "Server IPs cached; install lock ON (watchdog auto-unbricks if needed)"
 
 # ================================================================
 Write-Step "STEP 3 - CLEANUP (old installs)"
 # ================================================================
-Remove-TaskFully $TASK_MONITOR
-Remove-TaskFully $TASK_REPAIR
-Remove-TaskFully "WireGuard-KillSwitch-Monitor"
-Remove-TaskFully "WG-OnarimGorevi"
-Remove-TaskFully "WG-RepairTask"
-Remove-TaskFully "WG-RebootVerify"
-Remove-TaskFully $TASK_WATCHDOG
-Remove-TaskFully "WG-InternetWatchdog"
-Remove-TaskFully "WG-UnbrickResume"
+$cim = Get-ShortCimSession
+$cimArgs = @{}
+if ($cim) { $cimArgs['CimSession'] = $cim }
+
+Write-Info "Removing old scheduled tasks..."
+foreach ($tn in @($TASK_MONITOR, $TASK_REPAIR, 'WireGuard-KillSwitch-Monitor', 'WG-OnarimGorevi',
+        'WG-RepairTask', 'WG-RebootVerify', $TASK_WATCHDOG, 'WG-InternetWatchdog', 'WG-UnbrickResume')) {
+    Remove-TaskFully $tn
+}
 Remove-KurtarArtifacts
 
+Write-Info "Removing old NSSM service (if any)..."
 $oldSvc = & sc.exe query $WG_SVC_NAME 2>$null
 if ($oldSvc) {
-    if ($oldSvc -match "PAUSED") { & sc.exe continue $WG_SVC_NAME 2>$null | Out-Null; Start-Sleep 2 }
-    if (Test-Path $NSSM) { & $NSSM stop $WG_SVC_NAME 2>$null | Out-Null }
-    & sc.exe stop   $WG_SVC_NAME 2>$null | Out-Null; Start-Sleep 2
-    if (Test-Path $NSSM) { & $NSSM remove $WG_SVC_NAME confirm 2>$null | Out-Null }
-    & sc.exe delete $WG_SVC_NAME 2>$null | Out-Null; Start-Sleep 2
+    if ($oldSvc -match 'PAUSED') { Invoke-ScCommand @('continue', $WG_SVC_NAME) }
+    if (Test-Path $NSSM) {
+        $np = Start-Process -FilePath $NSSM -ArgumentList 'stop', $WG_SVC_NAME -PassThru -NoNewWindow -Wait:$false
+        $dl = (Get-Date).AddSeconds(12)
+        while (-not $np.HasExited -and (Get-Date) -lt $dl) { Start-Sleep -Milliseconds 200 }
+        if (-not $np.HasExited) { $np.Kill() }
+    }
+    Invoke-ScCommand @('stop', $WG_SVC_NAME)
+    if (Test-Path $NSSM) {
+        $np2 = Start-Process -FilePath $NSSM -ArgumentList 'remove', $WG_SVC_NAME, 'confirm' -PassThru -NoNewWindow -Wait:$false
+        $dl2 = (Get-Date).AddSeconds(12)
+        while (-not $np2.HasExited -and (Get-Date) -lt $dl2) { Start-Sleep -Milliseconds 200 }
+        if (-not $np2.HasExited) { $np2.Kill() }
+    }
+    Invoke-ScCommand @('delete', $WG_SVC_NAME)
 }
 
-Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
-    Where-Object { $_.Name -eq $WMI_FILTER } | Remove-CimInstance -EA SilentlyContinue
-Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -EA SilentlyContinue |
-    Where-Object { $_.Name -eq $WMI_CONSUMER } | Remove-CimInstance -EA SilentlyContinue
-Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -EA SilentlyContinue |
-    Where-Object { $_.Filter -like "*$WMI_FILTER*" } | Remove-CimInstance -EA SilentlyContinue
-
-foreach ($oldFilter in @("WGMonitorOldu")) {
-    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
-        Where-Object { $_.Name -eq $oldFilter } | Remove-CimInstance -EA SilentlyContinue
-}
+Write-Info "Removing old WMI subscriptions..."
+try {
+    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='$WMI_FILTER'" @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='$WMI_CONSUMER'" @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    $bindFilter = "Filter = ""__EventFilter.Name='$WMI_FILTER'"""
+    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter $bindFilter @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='WGMonitorOldu'" @cimArgs -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+} catch {}
 
 Remove-Item $STARTUP_LNK -Force -EA SilentlyContinue
 
-Get-CimInstance Win32_Process -EA SilentlyContinue |
-    Where-Object { (Test-IsMainMonitor $_.CommandLine) -or $_.CommandLine -like "*repair.ps1*" -or
-                   $_.CommandLine -like "*onarim.ps1*" -or $_.CommandLine -like "*service-monitor.ps1*" -or
-                   $_.CommandLine -like "*servis-monitor.ps1*" -or $_.CommandLine -like "*wmi-repair.ps1*" -or
-                   $_.CommandLine -like "*wmi-onarim.ps1*" } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+Write-Info "Legacy shells skipped (install lock active; old tasks removed)"
 
 $allRules = @(
     "KS-Block-WiFi-Out","KS-Block-Ethernet-Out","KS-Block-RemoteAccess-Out","KS-Block-PPP-Out",
@@ -823,12 +996,11 @@ Write-Step "STEP 4 - IPv6 BLOCK"
 # ================================================================
 netsh advfirewall firewall delete rule name="KS-Block-IPv6-Out" 2>$null | Out-Null
 netsh advfirewall firewall delete rule name="KS-Block-IPv6-In"  2>$null | Out-Null
-# netsh IPv6 remoteip lists are unreliable on some builds; registry + binding disable below are primary
 foreach ($pfx in @('fe80::/10','::1/128','fc00::/7')) {
     netsh advfirewall firewall add rule name="KS-Block-IPv6-Out" dir=out action=block remoteip=$pfx enable=yes 2>$null | Out-Null
     netsh advfirewall firewall add rule name="KS-Block-IPv6-In"  dir=in  action=block remoteip=$pfx enable=yes 2>$null | Out-Null
 }
-
+Write-Info "Disabling IPv6 bindings (timeout 45s)..."
 Disable-AllIPv6Bindings
 
 $ipv6RegParams = @{
@@ -1753,8 +1925,12 @@ try {
     $atScript = 'C:\WireGuard\anti-tamper.ps1'
     if (Test-Path $atScript) { & $atScript -NoChainRepair }
 
-    $wgRtc = 'C:\WireGuard\webrtc-leak-guard.ps1'
-    if (Test-Path $wgRtc) { & $wgRtc }
+    $wgPriv = 'C:\WireGuard\privacy-hardening-guard.ps1'
+    if (Test-Path $wgPriv) { & $wgPriv }
+    else {
+        $wgRtc = 'C:\WireGuard\webrtc-leak-guard.ps1'
+        if (Test-Path $wgRtc) { & $wgRtc }
+    }
 
     Repair-ConfigIntegrity
     Repair-EssentialFirewall
@@ -2403,138 +2579,102 @@ attrib +S +H $ANTI_TAMPER_PS1 2>$null | Out-Null
 OK "anti-tamper.ps1 written"
 
 # ================================================================
-Write-Step "STEP 10c - WEBRTC LEAK GUARD SCRIPT"
+Write-Step "STEP 10c - PRIVACY HARDENING GUARD SCRIPT"
 # ================================================================
-$webrtcGuardVersion = $WG_KS_VERSION
-$webrtcGuardContent = @"
-# WebRTC Leak Guard v$webrtcGuardVersion (auto-generated by install.ps1)
+$privacyGuardVersion = $WG_KS_VERSION
+$privacyGuardContent = @"
+# Privacy Hardening Guard v$privacyGuardVersion (auto-generated by install.ps1)
 `$ErrorActionPreference = 'SilentlyContinue'
 `$LOG = 'C:\WireGuard\killswitch.log'
-function Log(`$m) {
-    try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WEBRTC] `$m" -Encoding UTF8 } catch {}
-}
-`$chromium = @(
-    @{ Path = 'HKLM:\SOFTWARE\Policies\Google\Chrome'; Label = 'Chrome' },
-    @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label = 'Edge' },
-    @{ Path = 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label = 'Brave' }
-)
-foreach (`$b in `$chromium) {
-    try {
-        New-Item -Path `$b.Path -Force | Out-Null
-        Set-ItemProperty `$b.Path 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
-        Set-ItemProperty `$b.Path 'WebRtcLocalhostCandidateAllowed' 0 -Type DWord -Force
-        Log "`$(`$b.Label) WebRTC policy applied"
-    } catch { Log "`$(`$b.Label) WebRTC policy failed: `$_" }
-}
-`$ffPolicy = @'
-{
-  "policies": {
-    "Preferences": {
-      "media.peerconnection.ice.no_host": {
-        "Value": true,
-        "Status": "locked"
-      },
-      "media.peerconnection.ice.default_address_only": {
-        "Value": true,
-        "Status": "locked"
-      }
+function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [PRIVACY] `$m" -Encoding UTF8 } catch {} }
+function Set-ChromiumPrivacyPolicies([string]`$PolicyPath, [string]`$Label) {
+    `$props = @{
+        WebRtcIpHandlingPolicy='default_public_interface_only'; WebRtcLocalhostCandidateAllowed=0
+        BlockThirdPartyCookies=1; DefaultThirdPartyCookieSetting=1; EnableDoNotTrack=1
+        MetricsReportingEnabled=0; DeviceMetricsReportingEnabled=0; PaymentMethodQueryEnabled=0
+        BrowserSignin=0; SyncDisabled=1; AutofillAddressEnabled=0; AutofillCreditCardEnabled=0
+        DefaultGeolocationSetting=2; SafeBrowsingExtendedReportingEnabled=0; ChromeVariations=0
     }
-  }
+    New-Item -Path `$PolicyPath -Force | Out-Null
+    Set-ItemProperty `$PolicyPath 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
+    foreach (`$kv in `$props.GetEnumerator()) {
+        if (`$kv.Key -eq 'WebRtcIpHandlingPolicy') { continue }
+        Set-ItemProperty `$PolicyPath `$kv.Key `$kv.Value -Type DWord -Force
+    }
+    if (`$PolicyPath -match 'Microsoft\\Edge') {
+        Set-ItemProperty `$PolicyPath 'PersonalizationReportingEnabled' 0 -Type DWord -Force
+        Set-ItemProperty `$PolicyPath 'DiagnosticData' 0 -Type DWord -Force
+    }
+    Log "`$Label browser privacy applied"
 }
+foreach (`$b in @(
+    @{ Path='HKLM:\SOFTWARE\Policies\Google\Chrome'; Label='Chrome' },
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label='Edge' },
+    @{ Path='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label='Brave' }
+)) { try { Set-ChromiumPrivacyPolicies `$b.Path `$b.Label } catch { Log "`$(`$b.Label) failed: `$_" } }
+`$ffPolicy = @'
+{"policies":{"DisableTelemetry":true,"DoNotTrack":true,"Cookies":{"Default":"reject-third-party","RejectThirdParty":true,"Locked":true},"Preferences":{"media.peerconnection.ice.no_host":{"Value":true,"Status":"locked"},"media.peerconnection.ice.default_address_only":{"Value":true,"Status":"locked"},"privacy.resistFingerprinting":{"Value":true,"Status":"locked"},"privacy.trackingprotection.enabled":{"Value":true,"Status":"locked"},"privacy.trackingprotection.socialtracking.enabled":{"Value":true,"Status":"locked"},"network.cookie.cookieBehavior":{"Value":1,"Status":"locked"},"geo.enabled":{"Value":false,"Status":"locked"},"privacy.donottrackheader.enabled":{"Value":true,"Status":"locked"},"browser.contentblocking.category":{"Value":"strict","Status":"locked"}}}}
 '@
-foreach (`$ffDir in @('C:\Program Files\Mozilla Firefox\distribution', 'C:\Program Files (x86)\Mozilla Firefox\distribution')) {
+foreach (`$ffDir in @('C:\Program Files\Mozilla Firefox\distribution','C:\Program Files (x86)\Mozilla Firefox\distribution')) {
     `$ffRoot = Split-Path `$ffDir -Parent
     if (-not (Test-Path `$ffRoot)) { continue }
     try {
         New-Item -Path `$ffDir -ItemType Directory -Force | Out-Null
         `$ffPolicy | Set-Content (Join-Path `$ffDir 'policies.json') -Encoding UTF8 -Force
-        Log "Firefox WebRTC policy applied (`$ffRoot)"
-    } catch { Log "Firefox WebRTC policy failed: `$_" }
+        Log "Firefox privacy applied (`$ffRoot)"
+    } catch { Log "Firefox failed: `$_" }
 }
+`$regBlocks = @(
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Props=@{AllowTelemetry=0;MaxTelemetryAllowed=0;DoNotShowFeedbackNotifications=1;DisableOneSettingsDownloads=1;DisableTailoredExperiencesWithDiagnosticData=1}},
+    @{ Path='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'; Props=@{AllowTelemetry=0}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo'; Props=@{DisabledByGroupPolicy=1}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; Props=@{PublishUserActivities=0;EnableActivityFeed=0;UploadUserActivities=0}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors'; Props=@{DisableLocation=1;DisableLocationScripting=1}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Props=@{AllowCortana=0;AllowCloudSearch=0}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization'; Props=@{RestrictImplicitInkCollection=1;RestrictImplicitTextCollection=1}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Props=@{DisableWindowsConsumerFeatures=1;DisableCloudOptimizedContent=1}},
+    @{ Path='HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'; Props=@{LetAppsAccessAdvertisingId=2}}
+)
+foreach (`$block in `$regBlocks) {
+    try {
+        New-Item -Path `$block.Path -Force | Out-Null
+        foreach (`$kv in `$block.Props.GetEnumerator()) { Set-ItemProperty `$block.Path `$kv.Key `$kv.Value -Type DWord -Force }
+    } catch { Log "Registry failed: `$(`$block.Path)" }
+}
+foreach (`$svc in @('DiagTrack','dmwappushservice')) { & sc.exe config `$svc start= disabled 2>`$null | Out-Null; & sc.exe stop `$svc 2>`$null | Out-Null }
+Log 'Windows privacy reduction applied'
 "@
-$webrtcGuardContent | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
+$privacyGuardContent | Set-Content $PRIVACY_GUARD_PS1 -Encoding UTF8 -Force
+attrib +S +H $PRIVACY_GUARD_PS1 2>$null | Out-Null
+OK "privacy-hardening-guard.ps1 written"
+$webrtcForwarder = @"
+# WebRTC forwarder (v$privacyGuardVersion)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path `$main) { & `$main }
+"@
+$webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
 attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
-OK "webrtc-leak-guard.ps1 written"
+OK "webrtc-leak-guard.ps1 forwarder written"
 
 # ================================================================
 Write-Step "STEP 11 - MAIN SCHEDULED TASK (60s boot delay)"
 # ================================================================
 Remove-TaskFully $TASK_MONITOR
-$actionParams = @{
-    Execute  = "powershell.exe"
-    Argument = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$MONITOR_PS1`""
-}
-$action  = New-ScheduledTaskAction @actionParams
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$trigger.Delay = "PT60S"
-$settingsParams = @{
-    ExecutionTimeLimit         = [TimeSpan]::Zero
-    RestartCount               = 999
-    RestartInterval            = (New-TimeSpan -Minutes 1)
-    StartWhenAvailable         = $true
-    AllowStartIfOnBatteries    = $true
-    DontStopIfGoingOnBatteries = $true
-    RunOnlyIfNetworkAvailable  = $false
-    MultipleInstances          = 'IgnoreNew'
-}
-$settings  = New-ScheduledTaskSettingsSet @settingsParams
-$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$regParams = @{
-    TaskName  = $TASK_MONITOR
-    Action    = $action
-    Trigger   = $trigger
-    Settings  = $settings
-    Principal = $principal
-    Force     = $true
-}
-Register-ScheduledTask @regParams | Out-Null
-# Monitor start deferred to STEP 19 (after install lock cleared)
-$g1 = Get-ScheduledTask -TaskName $TASK_MONITOR -EA SilentlyContinue
-if ($g1) { OK "WG-KillSwitch task registered ($($g1.State)) - start deferred to STEP 19" }
-else      { Write-Err "WG-KillSwitch task registration FAILED!" }
+$monTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$MONITOR_PS1`""
+if (Register-TaskViaSchtasks $TASK_MONITOR $monTr '/SC ONSTART /DELAY 0001:00') {
+    OK "WG-KillSwitch task registered - start deferred to STEP 19"
+} else { Write-Err "WG-KillSwitch task registration FAILED!" }
 
 # ================================================================
 Write-Step "STEP 12 - REPAIR TASK (30s boot delay + every 2min)"
 # ================================================================
+# Repair cadence: every 2min; repair.ps1 enforces ExecutionTimeLimit Minutes 15 per run
 Remove-TaskFully $TASK_REPAIR
-$action2Params = @{
-    Execute  = "powershell.exe"
-    Argument = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR_PS1`""
-}
-$action2   = New-ScheduledTaskAction @action2Params
-$trigger2a = New-ScheduledTaskTrigger -AtStartup
-$trigger2a.Delay = "PT30S"
-# FIX: use 10 years instead of 9999 days - avoids Task Scheduler XML validation
-# failures on some Windows builds where P9999D exceeds the internal duration limit
-$trigger2bParams = @{
-    Once               = $true
-    At                 = (Get-Date).AddMinutes(5)
-    RepetitionInterval = (New-TimeSpan -Minutes 2)
-    RepetitionDuration = (New-TimeSpan -Days 3650)
-}
-$trigger2b  = New-ScheduledTaskTrigger @trigger2bParams
-$settings2Params = @{
-    ExecutionTimeLimit         = (New-TimeSpan -Minutes 15)
-    StartWhenAvailable         = $true
-    AllowStartIfOnBatteries    = $true
-    DontStopIfGoingOnBatteries = $true
-    RunOnlyIfNetworkAvailable  = $false
-    MultipleInstances          = 'IgnoreNew'
-}
-$settings2  = New-ScheduledTaskSettingsSet @settings2Params
-$principal2 = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$reg2Params = @{
-    TaskName  = $TASK_REPAIR
-    Action    = $action2
-    Trigger   = @($trigger2a, $trigger2b)
-    Settings  = $settings2
-    Principal = $principal2
-    Force     = $true
-}
-Register-ScheduledTask @reg2Params | Out-Null
-$g2 = Get-ScheduledTask -TaskName $TASK_REPAIR -EA SilentlyContinue
-if ($g2) { OK "WG-RepairTask registered ($($g2.State)) - 30s boot delay + every 2min" }
-else      { Write-Err "WG-RepairTask registration FAILED!" }
+$repTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR_PS1`""
+if (Register-TaskViaSchtasks $TASK_REPAIR $repTr '/SC MINUTE /MO 2') {
+    OK "WG-RepairTask registered - every 2min"
+} else { Write-Err "WG-RepairTask registration FAILED!" }
 
 # ================================================================
 Write-Step "STEP 12b - POST-REBOOT VERIFY TASK (5min boot delay)"
@@ -2548,66 +2688,35 @@ if (Test-Path $rebootVerifySrc) {
     WARN "post-reboot-verify.ps1 source missing in repo"
 }
 Remove-TaskFully $TASK_REBOOT_VERIFY
-$actionRvParams = @{
-    Execute  = "powershell.exe"
-    Argument = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REBOOT_VERIFY_PS1`""
-}
-$actionRv   = New-ScheduledTaskAction @actionRvParams
-$triggerRv  = New-ScheduledTaskTrigger -AtStartup
-$triggerRv.Delay = "PT5M"
-$settingsRvParams = @{
-    ExecutionTimeLimit         = (New-TimeSpan -Minutes 15)
-    StartWhenAvailable         = $true
-    AllowStartIfOnBatteries    = $true
-    DontStopIfGoingOnBatteries = $true
-    RunOnlyIfNetworkAvailable  = $false
-    MultipleInstances          = 'IgnoreNew'
-}
-$settingsRv  = New-ScheduledTaskSettingsSet @settingsRvParams
-$principalRv = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-Register-ScheduledTask -TaskName $TASK_REBOOT_VERIFY -Action $actionRv -Trigger $triggerRv -Settings $settingsRv -Principal $principalRv -Force | Out-Null
-$gRv = Get-ScheduledTask -TaskName $TASK_REBOOT_VERIFY -EA SilentlyContinue
-if ($gRv) { OK "WG-RebootVerify task registered ($($gRv.State)) - 5min after boot" }
-else       { WARN "WG-RebootVerify task registration failed" }
+$rvTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REBOOT_VERIFY_PS1`""
+if (Register-TaskViaSchtasks $TASK_REBOOT_VERIFY $rvTr '/SC ONSTART /DELAY 0005:00') {
+    OK "WG-RebootVerify task registered - 5min after boot"
+} else { WARN "WG-RebootVerify task registration failed" }
 
 # ================================================================
 Write-Step "STEP 12c - INTERNET WATCHDOG TASK (every 3min)"
 # ================================================================
 Remove-TaskFully $TASK_WATCHDOG
-$actionWdParams = @{
-    Execute  = "powershell.exe"
-    Argument = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WATCHDOG_PS1`""
-}
-$actionWd   = New-ScheduledTaskAction @actionWdParams
-$triggerWd  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
-$settingsWdParams = @{
-    ExecutionTimeLimit         = (New-TimeSpan -Minutes 5)
-    StartWhenAvailable         = $true
-    AllowStartIfOnBatteries    = $true
-    DontStopIfGoingOnBatteries = $true
-    RunOnlyIfNetworkAvailable  = $false
-    MultipleInstances          = 'IgnoreNew'
-}
-$settingsWd  = New-ScheduledTaskSettingsSet @settingsWdParams
-$principalWd = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-Register-ScheduledTask -TaskName $TASK_WATCHDOG -Action $actionWd -Trigger $triggerWd -Settings $settingsWd -Principal $principalWd -Force | Out-Null
-$gWd = Get-ScheduledTask -TaskName $TASK_WATCHDOG -EA SilentlyContinue
-if ($gWd) { OK "WG-InternetWatchdog registered ($($gWd.State)) - every 1min" }
-else       { WARN "WG-InternetWatchdog task registration failed" }
+$wdTr = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WATCHDOG_PS1`""
+if (Register-TaskViaSchtasks $TASK_WATCHDOG $wdTr '/SC MINUTE /MO 1') {
+    OK "WG-InternetWatchdog registered - every 1min"
+} else { WARN "WG-InternetWatchdog task registration failed" }
 
 # ================================================================
 Write-Step "STEP 13 - REGISTRY BACKUP + FOLDER PROTECTION"
 # ================================================================
-$acl = Get-Acl $INSTALL_DIR
-$acl.SetAccessRuleProtection($true, $false)
-$acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM",   "FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users",         "ReadAndExecute", "ContainerInherit,ObjectInherit","None","Allow")))
-Set-Acl -Path $INSTALL_DIR -AclObject $acl
-Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -ne 'killswitch.log' } |
-    ForEach-Object { attrib +S +H $_.FullName }
-OK "ACL set + files hidden"
+try {
+    $acl = Get-Acl $INSTALL_DIR -EA Stop
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM",   "FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users",         "ReadAndExecute", "ContainerInherit,ObjectInherit","None","Allow")))
+    Set-Acl -Path $INSTALL_DIR -AclObject $acl -EA Stop
+    Get-ChildItem $INSTALL_DIR -File -EA SilentlyContinue | Where-Object { $_.Name -ne 'killswitch.log' } |
+        ForEach-Object { attrib +S +H $_.FullName 2>$null | Out-Null }
+    OK "ACL set + files hidden"
+} catch { WARN "ACL/hide skipped: $_" }
 
 New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       $WG_KS_VERSION                      -Force
@@ -2615,7 +2724,7 @@ Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  (Join-Path $PSScri
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TunnelName"   $TUNNEL_NAME                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-$taskXml = Export-ScheduledTask -TaskName $TASK_MONITOR
+$taskXml = Export-TaskXmlSafe $TASK_MONITOR
 if ($taskXml) {
     $taskXml | Set-Content "$INSTALL_DIR\WG-KillSwitch-backup.xml" -Encoding UTF8 -Force
     $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($taskXml))
@@ -2635,7 +2744,7 @@ foreach ($pair in @(
     @{ Name = 'TaskXMLRebootVerify'; Task = $TASK_REBOOT_VERIFY },
     @{ Name = 'TaskXMLWatchdog'; Task = $TASK_WATCHDOG }
 )) {
-    $tx = Export-ScheduledTask -TaskName $pair.Task -EA SilentlyContinue
+    $tx = Export-TaskXmlSafe $pair.Task
     if ($tx) {
         $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($tx))
         Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" $pair.Name $b64 -Force
@@ -2669,7 +2778,33 @@ if (Test-Path $NSSM) {
 # ================================================================
 Write-Step "STEP 15 - WMI SUBSCRIPTION"
 # ================================================================
-if (Install-WmiSubscription) { OK "WMI Event Subscription active" }
+$wmiOk = $false
+$wmiJob = Start-Job -ArgumentList $WMI_FILTER, $WMI_CONSUMER, $WMI_WRAPPER -ScriptBlock {
+    param($filt, $cons, $wrap)
+    $cim = $null
+    try {
+        $opt = New-CimSessionOption -OperationTimeoutSec 8
+        $cim = New-CimSession -SessionOption $opt -ErrorAction Stop
+    } catch {}
+    $ca = @{}
+    if ($cim) { $ca['CimSession'] = $cim }
+    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='$filt'" @ca -EA SilentlyContinue | Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='$cons'" @ca -EA SilentlyContinue | Remove-CimInstance -EA SilentlyContinue
+    $bf = "Filter = ""__EventFilter.Name='$filt'"""
+    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter $bf @ca -EA SilentlyContinue | Remove-CimInstance -EA SilentlyContinue
+    $q = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name='powershell.exe' OR TargetInstance.Name='pwsh.exe')"
+    $filter = New-CimInstance -Namespace root\subscription -ClassName __EventFilter -Property @{ Name=$filt; EventNamespace='root\cimv2'; QueryLanguage='WQL'; Query=$q } -EA Stop
+    $consumer = New-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Property @{ Name=$cons; CommandLineTemplate="powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$wrap`"" } -EA Stop
+    if ($filter -and $consumer) {
+        New-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Property @{ Filter=[Ref]$filter; Consumer=[Ref]$consumer } -EA Stop | Out-Null
+        return $true
+    }
+    return $false
+}
+if (Wait-Job $wmiJob -Timeout 35) { $wmiOk = [bool](Receive-Job $wmiJob) }
+else { Stop-Job $wmiJob -EA SilentlyContinue }
+Remove-Job $wmiJob -Force -EA SilentlyContinue
+if ($wmiOk) { OK "WMI Event Subscription active" }
 else { WARN "WMI Subscription failed - 7 other layers still active" }
 
 # ================================================================
@@ -2812,13 +2947,23 @@ OK "Guard vault written ($GUARD_DIR)"
 # ================================================================
 Write-Step "STEP 18 - DEFENDER EXCLUSION"
 # ================================================================
-try { Add-MpPreference -ExclusionPath $INSTALL_DIR -EA Stop; OK "Defender exclusion: $INSTALL_DIR" }
-catch { WARN "Defender exclusion failed" }
+try {
+    $defJob = Start-Job { param($p) Add-MpPreference -ExclusionPath $p -EA Stop } -ArgumentList $INSTALL_DIR
+    if (Wait-Job $defJob -Timeout 25) {
+        Receive-Job $defJob | Out-Null
+        OK "Defender exclusion: $INSTALL_DIR"
+    } else {
+        Stop-Job $defJob -EA SilentlyContinue
+        WARN "Defender exclusion timed out (skipped)"
+    }
+    Remove-Job $defJob -Force -EA SilentlyContinue
+} catch { WARN "Defender exclusion failed" }
 
 # ================================================================
-Write-Step "STEP 18b - WEBRTC LEAK PROTECTION"
+Write-Step "STEP 18b - PRIVACY HARDENING"
 # ================================================================
-Install-WebRtcLeakProtection
+Install-PrivacyHardening
+if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: deployed" } else { WARN "privacy-hardening-guard.ps1: missing" }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: deployed" } else { WARN "webrtc-leak-guard.ps1: missing" }
 
 # ================================================================
@@ -2940,9 +3085,11 @@ $defExcl = (Get-MpPreference -EA SilentlyContinue).ExclusionPath
 if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { WARN "Defender exclusion: inactive" }
 
 foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
-    if (Test-WebRtcChromiumPolicy $pair[0]) { OK "WebRTC policy: $($pair[1])" }
-    else { WARN "WebRTC policy: $($pair[1]) missing"; $warnings++ }
+    if (Test-PrivacyChromiumPolicy $pair[0]) { OK "Browser privacy: $($pair[1])" }
+    else { WARN "Browser privacy: $($pair[1]) incomplete"; $warnings++ }
 }
+if (Test-WindowsTelemetryReduced) { OK "Windows telemetry: reduced" } else { WARN "Windows telemetry: not confirmed"; $warnings++ }
+if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: present" } else { WARN "privacy-hardening-guard.ps1: missing"; $warnings++ }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: present" } else { WARN "webrtc-leak-guard.ps1: missing"; $warnings++ }
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
@@ -2974,7 +3121,7 @@ Write-Host "  [8] HKLM Run key"                                   -ForegroundCol
 Write-Host "  [9] WG-RebootVerify: auto audit 5min after boot"   -ForegroundColor DarkGray
 Write-Host "  [10] WG-InternetWatchdog: auto-unbrick every 1min"  -ForegroundColor DarkGray
 Write-Host "  [+] Anti-tamper guard: silent restore from vault"  -ForegroundColor DarkGray
-Write-Host "  [+] WebRTC leak guard: Chromium/Edge/Brave/Firefox policies" -ForegroundColor DarkGray
+Write-Host "  [+] Privacy hardening: cookies/fingerprint/telemetry/ads" -ForegroundColor DarkGray
 Write-Host "  Reboot log: C:\WireGuard\reboot-verify.log"         -ForegroundColor DarkGray
 Write-Host ""
 if ($CUSTOM_MODE) {

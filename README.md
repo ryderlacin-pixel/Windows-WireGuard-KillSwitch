@@ -9,13 +9,13 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.3** is the current production release (WebRTC leak guard + v13.2 gentle unbrick — protection always stays installed).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.4** is the current production release (privacy hardening + kill switch — protection always stays installed).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.3](docs/releases/v13.3.md)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.4](docs/releases/v13.4.md)**.
 
 **Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
 
@@ -269,8 +269,13 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v13.3 (production — current)
-- **WebRTC leak guard:** Chromium/Edge/Brave HKLM policies + Firefox `policies.json`; repair re-applies via `webrtc-leak-guard.ps1`
+### v13.4 (production — current)
+- **Privacy hardening:** cookies, fingerprinting, telemetry, ads/cloud features + v13.3 WebRTC
+- General anonymity **~9/10** within project scope
+- See **[docs/releases/v13.4.md](docs/releases/v13.4.md)**
+
+### v13.3
+- **WebRTC leak guard:** Chromium/Edge/Brave HKLM policies + Firefox `policies.json`
 - See **[docs/releases/v13.3.md](docs/releases/v13.3.md)**
 
 ### v13.2
