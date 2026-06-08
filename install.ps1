@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.5)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v14.0)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v14.0: dnscrypt-proxy (127.0.0.1:53) + Tor Browser hardening + leak-sentinel (read-only);
+#   phased upgrades: -DnsLeakUpgradeOnly / -TorUpgradeOnly / -FullPrivacyUpgrade.
 # - v13.5: privacy engineer pass — Privacy Sandbox/DoH/QUIC off, Firefox RFP+, WER reduced,
 #   honest threat-model scores, script SHA256 integrity vault; supply-chain verify in safe-live-verify.
 # - v13.4: privacy hardening — cookies/tracking/fingerprint + Windows telemetry/ads/cloud;
@@ -71,11 +73,14 @@ param(
     [string]$CustomEndpointIP = "",  # Server IP or CIDR (e.g. "1.2.3.4/32")
     [int]$CustomPort          = 0,   # WireGuard port (default: 2408)
     [switch]$PrivacyUpgradeOnly,      # v13.5+ privacy/integrity refresh without full reinstall
+    [switch]$DnsLeakUpgradeOnly,      # v14: dnscrypt-proxy + WG DNS=127.0.0.1 only
+    [switch]$TorUpgradeOnly,          # v14: Tor Browser user.js hardening only
+    [switch]$FullPrivacyUpgrade,      # v14: dnscrypt + Tor + leak-sentinel + v13.5 privacy
     [switch]$NoPause                  # skip end pause (CI / automated resume)
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '13.5'
+$WG_KS_VERSION = '14.0'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -111,6 +116,26 @@ $GUARD_DIR    = 'C:\ProgramData\WGKillSwitchGuard'
 $ANTI_TAMPER_PS1 = "$INSTALL_DIR\anti-tamper.ps1"
 $WEBRTC_GUARD_PS1 = "$INSTALL_DIR\webrtc-leak-guard.ps1"
 $PRIVACY_GUARD_PS1 = "$INSTALL_DIR\privacy-hardening-guard.ps1"
+$DNSCRYPT_DIR      = "$INSTALL_DIR\dnscrypt-proxy"
+$DNSCRYPT_EXE      = "$DNSCRYPT_DIR\dnscrypt-proxy.exe"
+$DNSCRYPT_CONF     = "$DNSCRYPT_DIR\dnscrypt-proxy.toml"
+$DNSCRYPT_SVC      = 'WG-DnscryptProxy'
+$DNSCRYPT_GUARD_PS1 = "$INSTALL_DIR\dnscrypt-guard.ps1"
+$TOR_GUARD_PS1     = "$INSTALL_DIR\tor-hardening-guard.ps1"
+$TOR_MONITOR_PS1   = "$INSTALL_DIR\tor-connectivity-monitor.ps1"
+$LEAK_SENTINEL_PS1 = "$INSTALL_DIR\leak-sentinel.ps1"
+
+$script:WG_KS_VERSION = $WG_KS_VERSION
+$script:CONFIG = $CONFIG
+$script:NSSM = $NSSM
+$script:DNSCRYPT_DIR = $DNSCRYPT_DIR
+$script:DNSCRYPT_EXE = $DNSCRYPT_EXE
+$script:DNSCRYPT_CONF = $DNSCRYPT_CONF
+$script:DNSCRYPT_SVC = $DNSCRYPT_SVC
+$script:DNSCRYPT_GUARD_PS1 = $DNSCRYPT_GUARD_PS1
+$script:TOR_GUARD_PS1 = $TOR_GUARD_PS1
+$script:TOR_MONITOR_PS1 = $TOR_MONITOR_PS1
+$script:LEAK_SENTINEL_PS1 = $LEAK_SENTINEL_PS1
 
 # -- Custom mode (full validation in STEP 0) --
 $CUSTOM_MODE = ($CustomConfig -ne "")
@@ -654,6 +679,9 @@ function Install-ScriptIntegrityVault {
         Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' "Hash_$leaf" $hash -Force
     }
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'IntegrityVaultDate' (Get-Date -Format 'o') -Force
+    if (Get-Command Extend-ScriptIntegrityVaultV14 -EA SilentlyContinue) {
+        Extend-ScriptIntegrityVaultV14
+    }
 }
 
 function Test-PrivacyChromiumPolicy([string]$VendorPath) {
@@ -796,7 +824,8 @@ function Write-GuardBackups {
     $guardFiles = @(
         $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
         $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1,
-        $PRIVACY_GUARD_PS1, $WEBRTC_GUARD_PS1
+        $PRIVACY_GUARD_PS1, $WEBRTC_GUARD_PS1,
+        $DNSCRYPT_GUARD_PS1, $TOR_GUARD_PS1, $TOR_MONITOR_PS1, $LEAK_SENTINEL_PS1
     )
     foreach ($f in $guardFiles) {
         if (Test-Path $f) {
@@ -894,6 +923,9 @@ function Get-ServerIPs {
     return ($ipList -join ",")
 }
 
+$v14StackPath = Join-Path $PSScriptRoot 'scripts\install-v14-stack.ps1'
+if (Test-Path $v14StackPath) { . $v14StackPath } else { Write-Host ' [WARN] install-v14-stack.ps1 missing - v14 features disabled' -ForegroundColor Yellow }
+
 # ================================================================
 # ADMIN CHECK
 # ================================================================
@@ -907,12 +939,12 @@ if ($PrivacyUpgradeOnly) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
     Write-PrivacyHardeningGuardPs1
     OK "privacy-hardening-guard.ps1 written"
-    $webrtcForwarder = @"
-# WebRTC forwarder (v$WG_KS_VERSION)
-`$ErrorActionPreference = 'SilentlyContinue'
-`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
-if (Test-Path `$main) { & `$main }
-"@
+    $webrtcForwarder = @'
+# WebRTC forwarder (v'@ + $WG_KS_VERSION + @')
+$ErrorActionPreference = 'SilentlyContinue'
+$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path $main) { & $main }
+'@
     $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
     attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
     OK "webrtc-leak-guard.ps1 forwarder written"
@@ -936,6 +968,108 @@ if (Test-Path `$main) { & `$main }
         Write-Host "  PRIVACY UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
     }
     Write-Host "  Restart browsers for policy changes. Cloudflare still sees WARP traffic." -ForegroundColor Gray
+    if (-not $NoPause) { pause }
+    exit 0
+}
+
+if ($DnsLeakUpgradeOnly) {
+    Write-Step "DNS LEAK UPGRADE ONLY (v$WG_KS_VERSION)"
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    if (-not (Get-Command Invoke-V14DnsLeakStack -EA SilentlyContinue)) {
+        Write-Err "v14 stack not loaded"; exit 1
+    }
+    Invoke-V14DnsLeakStack
+    Write-GuardBackups
+    Install-ScriptIntegrityVault
+    $upgWarn = 0
+    if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
+        if (Test-V14DnsLeakHealthy) { OK 'dnscrypt-proxy: healthy (127.0.0.1:53)' }
+        else { WARN 'dnscrypt-proxy: not healthy yet - check WG-DnscryptProxy service'; $upgWarn++ }
+    }
+    if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" }
+    else { WARN "Script integrity vault: mismatch or missing"; $upgWarn++ }
+    try { Log "dns leak upgrade v$WG_KS_VERSION completed" } catch {}
+    Write-Host ""
+    if ($upgWarn -eq 0) {
+        Write-Host "  DNS LEAK UPGRADE COMPLETE (v$WG_KS_VERSION)" -ForegroundColor Green
+    } else {
+        Write-Host "  DNS LEAK UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
+    }
+    Write-Host "  Restart WireGuard tunnel to apply DNS=127.0.0.1" -ForegroundColor Gray
+    Write-Host "  Run: .\scripts\leak-audit.ps1 then .\scripts\safe-live-verify.ps1" -ForegroundColor Gray
+    if (-not $NoPause) { pause }
+    exit 0
+}
+
+if ($TorUpgradeOnly) {
+    Write-Step "TOR UPGRADE ONLY (v$WG_KS_VERSION)"
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    if (-not (Get-Command Invoke-V14TorStack -EA SilentlyContinue)) {
+        Write-Err "v14 stack not loaded"; exit 1
+    }
+    Invoke-V14TorStack
+    Write-GuardBackups
+    Install-ScriptIntegrityVault
+    $upgWarn = 0
+    if (Get-Command Test-V14TorPresent -EA SilentlyContinue) {
+        if (Test-V14TorPresent) { OK "Tor Browser: installed" }
+        else { WARN 'Tor Browser: not found - install manually from torproject.org'; $upgWarn++ }
+    }
+    if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" }
+    else { WARN "Script integrity vault: mismatch or missing"; $upgWarn++ }
+    try { Log "tor upgrade v$WG_KS_VERSION completed" } catch {}
+    Write-Host ""
+    if ($upgWarn -eq 0) {
+        Write-Host "  TOR UPGRADE COMPLETE (v$WG_KS_VERSION)" -ForegroundColor Green
+    } else {
+        Write-Host "  TOR UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
+    }
+    Write-Host "  Start Tor Browser for sensitive browsing only. Cloudflare still sees WARP entry." -ForegroundColor Gray
+    if (-not $NoPause) { pause }
+    exit 0
+}
+
+if ($FullPrivacyUpgrade) {
+    Write-Step "FULL PRIVACY UPGRADE (v$WG_KS_VERSION)"
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    Write-PrivacyHardeningGuardPs1
+    OK "privacy-hardening-guard.ps1 written"
+    $webrtcForwarder = @'
+# WebRTC forwarder (v'@ + $WG_KS_VERSION + @')
+$ErrorActionPreference = 'SilentlyContinue'
+$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path $main) { & $main }
+'@
+    $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
+    attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
+    Install-PrivacyHardening
+    if (Get-Command Invoke-V14FullPrivacyStack -EA SilentlyContinue) {
+        Invoke-V14FullPrivacyStack
+    } else { WARN 'v14 stack not loaded - dnscrypt/Tor/leak-sentinel skipped' }
+    Write-GuardBackups
+    Install-ScriptIntegrityVault
+    $upgWarn = 0
+    foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
+        if (Test-PrivacyChromiumPolicy $pair[0]) { OK "Browser privacy: $($pair[1])" }
+        else { WARN "Browser privacy: $($pair[1]) incomplete"; $upgWarn++ }
+    }
+    if (Test-WindowsTelemetryReduced) { OK "Windows telemetry: reduced (not eliminated)" }
+    else { WARN "Windows telemetry: not confirmed"; $upgWarn++ }
+    if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
+        if (Test-V14DnsLeakHealthy) { OK "dnscrypt-proxy: healthy" }
+        else { WARN "dnscrypt-proxy: not healthy"; $upgWarn++ }
+    }
+    if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" }
+    else { WARN "Script integrity vault: mismatch or missing"; $upgWarn++ }
+    try { Log "full privacy upgrade v$WG_KS_VERSION completed" } catch {}
+    Write-Host ""
+    if ($upgWarn -eq 0) {
+        Write-Host "  FULL PRIVACY UPGRADE COMPLETE (v$WG_KS_VERSION)" -ForegroundColor Green
+    } else {
+        Write-Host "  FULL PRIVACY UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
+    }
+    Write-Host "  Restart WG tunnel + browsers. Tor = sensitive use only." -ForegroundColor Gray
+    if (-not $NoPause) { pause }
     exit 0
 }
 
@@ -2123,6 +2257,14 @@ try {
         $wgRtc = 'C:\WireGuard\webrtc-leak-guard.ps1'
         if (Test-Path $wgRtc) { & $wgRtc }
     }
+    $wgDns = 'C:\WireGuard\dnscrypt-guard.ps1'
+    if (Test-Path $wgDns) { & $wgDns }
+    $wgTor = 'C:\WireGuard\tor-hardening-guard.ps1'
+    if (Test-Path $wgTor) { & $wgTor }
+    $wgTorMon = 'C:\WireGuard\tor-connectivity-monitor.ps1'
+    if (Test-Path $wgTorMon) { & $wgTorMon }
+    $wgLeak = 'C:\WireGuard\leak-sentinel.ps1'
+    if (Test-Path $wgLeak) { & $wgLeak }
 
     Repair-ConfigIntegrity
     Repair-EssentialFirewall
@@ -2790,15 +2932,23 @@ Write-Step "STEP 10c - PRIVACY HARDENING GUARD SCRIPT"
 Write-PrivacyHardeningGuardPs1
 OK "privacy-hardening-guard.ps1 written"
 $privacyGuardVersion = $WG_KS_VERSION
-$webrtcForwarder = @"
-# WebRTC forwarder (v$privacyGuardVersion)
-`$ErrorActionPreference = 'SilentlyContinue'
-`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
-if (Test-Path `$main) { & `$main }
-"@
+$webrtcForwarder = @'
+# WebRTC forwarder (v'@ + $privacyGuardVersion + @')
+$ErrorActionPreference = 'SilentlyContinue'
+$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path $main) { & $main }
+'@
 $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
 attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
 OK "webrtc-leak-guard.ps1 forwarder written"
+
+# ================================================================
+Write-Step "STEP 10d - V14 PRIVACY STACK GUARD SCRIPTS"
+# ================================================================
+if (Get-Command Write-AllV14GuardScripts -EA SilentlyContinue) {
+    Write-AllV14GuardScripts
+    OK "v14 guard scripts written (dnscrypt/tor/leak-sentinel)"
+} else { WARN 'v14 stack missing - guard scripts skipped' }
 
 # ================================================================
 Write-Step "STEP 11 - MAIN SCHEDULED TASK (60s boot delay)"
@@ -3085,6 +3235,39 @@ if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: deployed" } else {
 if (Test-ScriptIntegrityVault) { OK "Script integrity vault: seeded" } else { WARN "Script integrity vault: not verified" }
 
 # ================================================================
+Write-Step "STEP 18c - V14 DNS LEAK STACK (dnscrypt-proxy)"
+# ================================================================
+if (Get-Command Invoke-V14DnsLeakStack -EA SilentlyContinue) {
+    Invoke-V14DnsLeakStack
+    if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
+        if (Test-V14DnsLeakHealthy) { OK "dnscrypt-proxy: healthy" }
+        else { WARN "dnscrypt-proxy: service not healthy yet (guard will retry)" }
+    }
+} else { WARN "v14 DNS stack skipped (install-v14-stack.ps1 missing)" }
+
+# ================================================================
+Write-Step "STEP 18d - V14 TOR HARDENING"
+# ================================================================
+if (Get-Command Invoke-V14TorStack -EA SilentlyContinue) {
+    Invoke-V14TorStack
+    if (Get-Command Test-V14TorPresent -EA SilentlyContinue) {
+        if (Test-V14TorPresent) { OK "Tor Browser: present" }
+        else { WARN "Tor Browser: not installed (manual install from torproject.org)" }
+    }
+} else { WARN "v14 Tor stack skipped" }
+
+# ================================================================
+Write-Step "STEP 18e - V14 LEAK SENTINEL (read-only probe)"
+# ================================================================
+if (Test-Path $LEAK_SENTINEL_PS1) {
+    & $LEAK_SENTINEL_PS1 2>$null
+    $leakSt = (Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name LeakState -EA SilentlyContinue).LeakState
+    if ($leakSt -eq 'HEALTHY') { OK "leak-sentinel: HEALTHY" }
+    elseif ($leakSt) { WARN "leak-sentinel: $leakSt" }
+    else { OK "leak-sentinel: probe completed" }
+} else { WARN "leak-sentinel.ps1 missing" }
+
+# ================================================================
 Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
 # ================================================================
 Ensure-TunnelForInstall | Out-Null
@@ -3209,6 +3392,15 @@ foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('
 if (Test-WindowsTelemetryReduced) { OK "Windows telemetry: reduced (not eliminated)" } else { WARN "Windows telemetry: not confirmed"; $warnings++ }
 if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: present" } else { WARN "privacy-hardening-guard.ps1: missing"; $warnings++ }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: present" } else { WARN "webrtc-leak-guard.ps1: missing"; $warnings++ }
+if (Test-Path $DNSCRYPT_GUARD_PS1) { OK "dnscrypt-guard.ps1: present" } else { WARN "dnscrypt-guard.ps1: missing"; $warnings++ }
+if (Test-Path $LEAK_SENTINEL_PS1) { OK "leak-sentinel.ps1: present" } else { WARN "leak-sentinel.ps1: missing"; $warnings++ }
+if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
+    if (Test-V14DnsLeakHealthy) { OK 'dnscrypt-proxy: RUNNING + 127.0.0.1:53' }
+    else { WARN "dnscrypt-proxy: not healthy"; $warnings++ }
+}
+$torSt = (Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name TorState -EA SilentlyContinue).TorState
+if ($torSt -eq 'NOT_INSTALLED') { WARN "Tor Browser: not installed (optional)" }
+elseif ($torSt) { OK "Tor state: $torSt" }
 if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" } else { WARN "Script integrity vault: mismatch"; $warnings++ }
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
@@ -3241,6 +3433,9 @@ Write-Host "  [9] WG-RebootVerify: auto audit 5min after boot"   -ForegroundColo
 Write-Host "  [10] WG-InternetWatchdog: auto-unbrick every 1min"  -ForegroundColor DarkGray
 Write-Host "  [+] Anti-tamper guard: silent restore from vault"  -ForegroundColor DarkGray
 Write-Host "  [+] Privacy hardening: cookies/fingerprint/telemetry/ads" -ForegroundColor DarkGray
+Write-Host "  [+] dnscrypt-proxy: encrypted DNS via 127.0.0.1 (WG DNS)" -ForegroundColor DarkGray
+Write-Host "  [+] Tor hardening: user.js (start Tor Browser manually)" -ForegroundColor DarkGray
+Write-Host "  [+] leak-sentinel: read-only DNS leak probe (no firewall changes)" -ForegroundColor DarkGray
 Write-Host "  Reboot log: C:\WireGuard\reboot-verify.log"         -ForegroundColor DarkGray
 Write-Host ""
 if ($CUSTOM_MODE) {

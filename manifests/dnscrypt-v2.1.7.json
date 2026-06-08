@@ -1,0 +1,6 @@
+{
+  "version": "2.1.7",
+  "url": "https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/2.1.7/dnscrypt-proxy-win64-2.1.7.zip",
+  "sha256": "66EB1BE3D700F023ABEC65D7206DD979A272330C6F29A72D4612F12521292EAB",
+  "exe": "dnscrypt-proxy.exe"
+}

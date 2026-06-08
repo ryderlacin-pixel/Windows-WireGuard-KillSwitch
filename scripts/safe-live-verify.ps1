@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v13.5 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v14.0 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -88,15 +88,24 @@ function Test-ScriptIntegrityVault {
     foreach ($pair in @(
         @{ File = 'C:\WireGuard\monitor.ps1'; Key = 'Hash_monitor.ps1' },
         @{ File = 'C:\WireGuard\repair.ps1'; Key = 'Hash_repair.ps1' },
-        @{ File = 'C:\WireGuard\privacy-hardening-guard.ps1'; Key = 'Hash_privacy-hardening-guard.ps1' }
+        @{ File = 'C:\WireGuard\privacy-hardening-guard.ps1'; Key = 'Hash_privacy-hardening-guard.ps1' },
+        @{ File = 'C:\WireGuard\dnscrypt-guard.ps1'; Key = 'Hash_dnscrypt-guard.ps1' },
+        @{ File = 'C:\WireGuard\leak-sentinel.ps1'; Key = 'Hash_leak-sentinel.ps1' }
     )) {
         $expected = $reg.$($pair.Key)
-        if ([string]::IsNullOrWhiteSpace($expected)) { return $false }
+        if ([string]::IsNullOrWhiteSpace($expected)) { continue }
         if (-not (Test-Path $pair.File)) { return $false }
         $actual = (Get-FileHash -Path $pair.File -Algorithm SHA256).Hash
         if ($actual -ne $expected) { return $false }
     }
     return $true
+}
+
+function Test-DnscryptHealthy {
+    $st = & sc.exe query WG-DnscryptProxy 2>&1 | Out-String
+    if ($st -notmatch 'RUNNING') { return $false }
+    $net = & netstat.exe -ano 2>&1 | Out-String
+    return ($net -match '127\.0\.0\.1:53\s+.*LISTENING')
 }
 
 function Get-MonitorCount {
@@ -112,15 +121,16 @@ function Get-MonitorCount {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  SAFE LIVE VERIFY (v13.5 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  SAFE LIVE VERIFY (v14.0 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  Metrics: KillSwitch | DnsLeak | Tor" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $healthy = Test-SafeToOpen
-Assert $healthy 'Health: tunnel + TCP internet (SafeToOpen)'
+Assert $healthy 'KillSwitch: tunnel + TCP internet (SafeToOpen)'
 if (-not $healthy) { Write-Host "  [WARN] System unhealthy - read-only audits only" -ForegroundColor Yellow }
 
 $ksReg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($ksReg -and $ksReg.Version -ge '13.5') "Registry version 13.5+ (got $($ksReg.Version))"
+Assert ($ksReg -and ($ksReg.Version -ge '14.0' -or ($ksReg.Version -ge '13.5' -and $ksReg.V14DnsLeak -eq '1'))) "Registry version 14.0+ or phased v13.5+V14DnsLeak (got $($ksReg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) 'kurtar.bat removed'
@@ -140,7 +150,7 @@ $svc = Get-Content 'C:\WireGuard\service-monitor.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
 $wd = Get-Content 'C:\WireGuard\internet-watchdog.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v13\.5') 'monitor.ps1 version v13.5'
+Assert ($mon -match 'v14\.0|Monitor v14|v13\.5|Monitor v13') 'monitor.ps1 version (v14 or v13.5 phased)'
 Assert ($mon -match 'Test-TunnelAdapterUp') 'monitor dual-check: service + adapter'
 Assert ($mon -match 'Test-BootGrace') 'monitor has BootGrace fail-open'
 Assert ($mon -match 'Test-BlockAllowed') 'monitor has block-allowed guard'
@@ -148,14 +158,16 @@ Assert ($mon -notmatch 'Test-Dns') 'monitor SafeToOpen excludes DNS gate'
 Assert ($mon -match 'no re-block') 'monitor recovery never re-blocks'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
 Assert ($mon -notmatch 'kurtar') 'monitor has no kurtar references'
-Assert ($rep -match 'v13\.5|Repair Script v13') 'repair.ps1 version v13.5'
+Assert ($rep -match 'v14\.0|Repair Script v14|v13\.5|Repair Script v13') 'repair.ps1 version (v14 or v13.5 phased)'
 Assert ($rep -match 'privacy-hardening-guard\.ps1') 'repair re-applies privacy guard'
+Assert ($rep -match 'dnscrypt-guard\.ps1') 'repair re-applies dnscrypt guard'
+Assert ($rep -match 'leak-sentinel\.ps1') 'repair runs leak-sentinel'
 Assert ($rep -match 'monitor-only block authority') 'repair never blocks (monitor-only)'
 Assert ($rep -notmatch 'function Enable-Block') 'repair has no Enable-Block function'
 Assert ($wd -match 'Invoke-GentleUnbrick') 'watchdog has gentle unbrick'
 Assert ($wd -match 'Invoke-DeepUnbrick') 'watchdog has deep unbrick (no teardown)'
 Assert ($wd -notmatch 'kurtar') 'watchdog has no kurtar references'
-Assert ($gpo -match 'v13\.5') 'GPO script version v13.5'
+Assert ($gpo -match 'v14\.0|v13\.5') 'GPO script version (v14 or v13.5 phased)'
 Assert ($gpo -match 'never blocks') 'GPO has no block authority'
 
 foreach ($tn in @('WG-KillSwitch', 'WG-RepairTask', 'WG-RebootVerify', 'WG-InternetWatchdog')) {
@@ -183,7 +195,7 @@ if ($healthy) {
 
 Assert (Test-Path 'C:\ProgramData\WGKillSwitchGuard') 'Anti-tamper guard vault present'
 foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
-    Assert (Test-PrivacyChromiumPolicy $pair[0]) "Browser privacy v13.5: $($pair[1])"
+    Assert (Test-PrivacyChromiumPolicy $pair[0]) "Browser privacy v14: $($pair[1])"
 }
 $tel = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection' -EA SilentlyContinue
 Assert ($tel -and $tel.AllowTelemetry -eq 0) 'Windows telemetry: AllowTelemetry=0'
@@ -201,6 +213,26 @@ Assert ($priv -match 'fingerprintingProtection') 'privacy guard: Firefox fingerp
 Assert ($priv -match 'webgl\.disabled') 'privacy guard: Firefox WebGL off'
 Assert ($priv -match 'AllowTelemetry') 'privacy guard reduces Windows telemetry'
 Assert (Test-ScriptIntegrityVault) 'Script integrity vault: SHA256 match'
+
+# --- v14 DnsLeak metric ---
+Assert (Test-Path 'C:\WireGuard\dnscrypt-guard.ps1') 'DnsLeak: dnscrypt-guard.ps1 deployed'
+Assert (Test-Path 'C:\WireGuard\leak-sentinel.ps1') 'DnsLeak: leak-sentinel.ps1 deployed'
+if ($ksReg.V14DnsLeak -eq '1' -or (Test-Path 'C:\WireGuard\dnscrypt-proxy\dnscrypt-proxy.exe')) {
+    Assert (Test-DnscryptHealthy) 'DnsLeak: dnscrypt-proxy RUNNING + 127.0.0.1:53'
+    $cfgDns = Get-Content 'C:\WireGuard\wgcf-profile.conf' -EA SilentlyContinue | Where-Object { $_ -match '^\s*DNS\s*=' } | Select-Object -First 1
+    Assert ($cfgDns -match '127\.0\.0\.1') 'DnsLeak: WireGuard DNS = 127.0.0.1'
+    $leakSt = $ksReg.LeakState
+    if ($leakSt) { Assert ($leakSt -eq 'HEALTHY') "DnsLeak: LeakState $leakSt" }
+}
+
+# --- v14 Tor metric (optional) ---
+Assert (Test-Path 'C:\WireGuard\tor-hardening-guard.ps1') 'Tor: tor-hardening-guard.ps1 deployed'
+$torSt = $ksReg.TorState
+if ($torSt -eq 'NOT_INSTALLED') {
+    Write-Host "  [INFO] Tor: not installed (optional)" -ForegroundColor Gray
+} elseif ($torSt) {
+    Assert ($torSt -in @('HEALTHY','TOR_DOWN')) "Tor: TorState $torSt"
+}
 
 Assert (Test-Internet) 'Post-check: TCP internet still working'
 
