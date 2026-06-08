@@ -269,6 +269,22 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
+### v13.2 (production — current)
+- **kurtar removed:** `kurtar.bat`, `kurtar.ps1`, `kurtar2.ps1`, `resume-after-unbrick.ps1` — protection is never torn down
+- **Gentle/deep unbrick only:** watchdog + monitor remove blocks and set `UnbrickUntil`; tasks and `WGKillSwitchSvc` stay running
+- See **[docs/releases/v13.2.md](docs/releases/v13.2.md)**
+
+### v13.1
+- **Monitor-only block authority:** repair/GPO/SVC never `Enable-Block`
+- **Startup fail-open:** unhealthy boot waits for debounce; recovery loop never re-blocks
+- **Tunnel dual-check:** WireGuard service RUNNING + adapter Up
+- See **[docs/releases/v13.1.md](docs/releases/v13.1.md)**
+
+### v13.0 (ultimate fail-open)
+- **SafeToOpen** = tunnel + TCP only (DNS never gates open); **BootGrace** 180s; debounced blocks (5× tunnel-down, 15× zombie)
+- **safe-live-verify.ps1** production gate (read-only, non-disruptive)
+- See **[docs/releases/v13.0.md](docs/releases/v13.0.md)**
+
 ### v12.0 (ultimate)
 - **WMI fix:** single subscription watches both `powershell.exe` and `pwsh.exe` (OR query)
 - **PID hardening:** monitor/repair validate `monitor.pid` by command-line, not PID reuse

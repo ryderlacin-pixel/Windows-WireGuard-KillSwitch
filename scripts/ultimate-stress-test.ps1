@@ -196,7 +196,7 @@ for ($passNum = 1; $passNum -le $PassCount; $passNum++) {
     Write-Host '[stress] Double install.ps1 run...' -ForegroundColor Gray
     echo "" | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'install.ps1') 2>$null | Out-Null
     Start-Sleep 8
-    Assert (Test-Path 'C:\WireGuard\kurtar.bat') "Install: kurtar.bat present after double install"
+    Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) "Install: kurtar.bat absent after double install (v13.2+)"
     Assert ((Get-MonitorCount) -le 1) "Install: single monitor after double install"
     Assert (Wait-Healthy 120) "Install: healthy after double install"
 

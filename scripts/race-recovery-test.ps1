@@ -25,7 +25,7 @@ $CONFIG = 'C:\WireGuard\wgcf-profile.conf'
 $WG = 'C:\Program Files\WireGuard\wireguard.exe'
 $LOG = 'C:\WireGuard\killswitch.log'
 $REPAIR = 'C:\WireGuard\repair.ps1'
-$KURTAR = 'C:\WireGuard\kurtar.ps1'
+
 
 function Assert([bool]$cond, [string]$name) {
     $script:total++
@@ -87,9 +87,7 @@ function Restore-Internet {
     }
     netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>$null | Out-Null
     Clear-DnsClientCache -EA SilentlyContinue
-    if (Test-Path $KURTAR) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $KURTAR 2>$null | Out-Null
-    } elseif ((Test-Path $WG) -and (Test-Path $CONFIG) -and -not (Test-TunnelRunning)) {
+    if ((Test-Path $WG) -and (Test-Path $CONFIG) -and -not (Test-TunnelRunning)) {
         & $WG /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
         Start-Sleep 3
         & $WG /installtunnelservice $CONFIG 2>$null | Out-Null

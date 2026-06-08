@@ -271,7 +271,7 @@ if (-not $ConfirmDisruptiveTests) {
     Start-Sleep 8
     $restored = Test-TunnelRunning
     if ($restored) { Add-Result 'Kill Switch SIM' 'Tunnel restored' 'PASS' 'Reinstalled OK' }
-    else { Add-Result 'Kill Switch SIM' 'Tunnel restored' 'FAIL' 'Could not restore - run kurtar.bat' }
+    else { Add-Result 'Kill Switch SIM' 'Tunnel restored' 'FAIL' 'Could not restore - re-run install.ps1 or wait for WG-InternetWatchdog' }
 } else {
     Add-Result 'Kill Switch SIM' 'Tunnel stop test' 'WARN' 'Skipped - tunnel already down'
 }
