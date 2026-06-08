@@ -6,12 +6,14 @@ on:
     branches: [main]
     paths:
       - 'install.ps1'
+      - 'lib/**'
       - 'scripts/**'
       - '.github/workflows/**'
   pull_request:
     branches: [main]
     paths:
       - 'install.ps1'
+      - 'lib/**'
       - 'scripts/**'
       - '.github/workflows/**'
 

@@ -2,18 +2,19 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v10.7](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v10.7)
+**Current release:** [v15.1](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.1)
 
-This document answers the questions raised during external review of v10.2–v10.3 and explains what changed in **v10.4**.
+This document answers reviewer questions from v10.2–v10.4 and summarizes v11–v15 production changes. **v15.1** splits implementation into [`lib/`](../lib/) modules; [`install.ps1`](../install.ps1) remains the single entry point.
 
 ---
 
 ## Quick start for reviewers
 
-1. Read the **DESIGN PHILOSOPHY** block at the top of [`install.ps1`](../install.ps1) (lines 11–26).
-2. Skim the **8 recovery layers** in [README.md](../README.md#architecture).
-3. Compare your concerns against the **Review response table** below.
-4. Test on a VM — never on your only machine first.
+1. Read the **DESIGN PHILOSOPHY** block at the top of [`install.ps1`](../install.ps1).
+2. Skim **lib module map** below, then recovery layers in [README.md](../README.md#architecture).
+3. Compare concerns against the **Review response table** (v10) and **Version history** (v11–v15).
+4. Offline gate: `.\scripts\test-suite.ps1` (164+ assertions). Live (optional): `.\scripts\live-smoke-test.ps1`.
+5. Test on a VM first — never on your only machine.
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
@@ -200,6 +201,34 @@ All reports must be in **English**.
 | v10.4 | All v10.2–v10.3 review items addressed; design doc in `install.ps1` header |
 | v10.5 | AbandonedMutexException-safe mutex waits (monitor respawn after kill) |
 | v10.6 | Zombie-tunnel prevention, tethering/PPP blocks, runtime WARP IP refresh, pwsh support |
-| v10.7 | Parse fix, layer sync (`Sync-KillSwitchState`), conditional server rule, 30-assertion test suite |
+| v10.7 | Parse fix, layer sync (`Sync-KillSwitchState`), conditional server rule, test suite |
+| v11.0–v11.3 | Ultimate hardening, reboot verify, monitor singleton, anti-tamper guard |
+| v12.0–v13.5 | Fail-open policy, DNS leak guards, privacy/telemetry hardening, integrity vault |
+| v14.0 | dnscrypt-proxy, Tor user.js, leak-sentinel (read-only) |
+| v15.0 | System DNS lock, network privacy, strict dnscrypt, sensitive-mode launcher |
+| v15.1 | `lib/` modular split, WARP-first docs, one-step Hassas-Tarama, optional CI live-smoke |
 
 See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases) for full notes per version.
+
+---
+
+## lib/ module map (v15.1)
+
+| Module | Role |
+|--------|------|
+| `Install-Constants.ps1` | Paths, service names, registry keys |
+| `Install-Helpers.ps1` | Logging, mutex, Test-Internet, tunnel/WMI/task helpers |
+| `Install-Privacy.ps1` | Browser policies, telemetry reduction, guard vault |
+| `Install-UpgradePaths.ps1` | `-StrongPrivacyUpgrade` and phased upgrade early-exit |
+| `Install-MainSteps-0-6.ps1` | WireGuard, firewall, tunnel (STEP 0–6) |
+| `Install-GeneratedScripts.ps1` | monitor/repair/watchdog/anti-tamper heredocs |
+| `Install-TasksAndWmi.ps1` | Scheduled tasks, NSSM, WMI, GPO boot script |
+| `Install-MainSteps-18-20.ps1` | Privacy stacks, activation, final checks |
+
+Dot-sourced stacks: `scripts/install-v14-stack.ps1`, `scripts/install-v15-privacy-stack.ps1`.
+
+---
+
+## Why lib/ modules (not one 3500-line file)?
+
+**v15.1** keeps `.\install.ps1` as the user-facing command while moving generated-script builders and step logic into reviewable modules. Behavior is unchanged; offline tests concatenate `install.ps1` + `lib/*.ps1` for pattern coverage.

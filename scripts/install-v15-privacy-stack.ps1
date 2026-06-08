@@ -252,12 +252,15 @@ function Install-V15WifiRandomMac {
 }
 
 function Install-SensitiveModeLauncher {
-    $src = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\sensitive-mode.ps1'
-    if (-not (Test-Path $src)) {
-        $src = Join-Path $PSScriptRoot 'sensitive-mode.ps1'
-    }
-    $dest = "$script:INSTALL_DIR\sensitive-mode.ps1"
-    if (Test-Path $src) {
+    $repoScripts = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts'
+    foreach ($pair in @(
+        @('sensitive-mode.ps1', "$script:INSTALL_DIR\sensitive-mode.ps1"),
+        @('ensure-tor-sensitive.ps1', "$script:INSTALL_DIR\ensure-tor-sensitive.ps1")
+    )) {
+        $src = Join-Path $repoScripts $pair[0]
+        if (-not (Test-Path $src)) { $src = Join-Path $PSScriptRoot $pair[0] }
+        $dest = $pair[1]
+        if (-not (Test-Path $src)) { WARN "$($pair[0]) source missing"; continue }
         if (Test-Path $dest) {
             icacls $dest /grant 'BUILTIN\Administrators:F' /C 2>$null | Out-Null
             attrib -R -S -H $dest 2>$null | Out-Null
@@ -266,11 +269,10 @@ function Install-SensitiveModeLauncher {
             $enc = New-Object System.Text.UTF8Encoding $false
             [System.IO.File]::WriteAllText($dest, (Get-Content $src -Raw -Encoding UTF8), $enc)
             attrib +S +H $dest 2>$null | Out-Null
-            OK 'sensitive-mode.ps1 deployed'
-        } catch {
-            WARN "sensitive-mode.ps1 deploy failed: $_"
-        }
-    } else { WARN 'sensitive-mode.ps1 source missing' }
+            OK "$($pair[0]) deployed"
+        } catch { WARN "$($pair[0]) deploy failed: $_" }
+    }
+    $dest = "$script:INSTALL_DIR\sensitive-mode.ps1"
     try {
         $desk = [Environment]::GetFolderPath('Desktop')
         $lnkPath = Join-Path $desk 'Hassas-Tarama.lnk'
@@ -279,7 +281,7 @@ function Install-SensitiveModeLauncher {
         $lnk.TargetPath = 'powershell.exe'
         $lnk.Arguments = "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"$dest`""
         $lnk.WorkingDirectory = $script:INSTALL_DIR
-        $lnk.Description = 'Tor Browser sensitive browsing (v15)'
+        $lnk.Description = 'Tor Browser sensitive browsing (v15.1 one-step)'
         $lnk.Save()
         OK 'Hassas-Tarama.lnk shortcut created'
     } catch { WARN "Hassas-Tarama shortcut failed: $_" }

@@ -9,15 +9,15 @@
 
 > **One script. Full kill switch. Strong privacy stack (v15).**
 
-Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default:** free anonymous Cloudflare WARP. **Recommended for higher anonymity:** connect your own **paid, no-log WireGuard VPN** (Mullvad, ProtonVPN, IVPN, etc.) — same kill switch + privacy stack, better exit identity.
+Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1).
 
-**v15.0** is the current production release.
+**v15.1** is the current production release.
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.0](docs/releases/v15.0.md)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.1](docs/releases/v15.1.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
 
 **Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
 
@@ -82,70 +82,35 @@ Validated on **Windows 11** with production use across multiple reboots (v10.0+)
 
 ---
 
-## Privacy & anonymity — WARP vs your own paid VPN
+## Privacy & anonymity (honest)
 
-This project separates **leak protection** (kill switch + DNS lock) from **who sees your traffic at the VPN layer**.
+This project separates **leak protection** (always-on with `.\install.ps1`) from **exit identity** (who terminates your VPN tunnel).
 
-### Three practical tiers
+### Three tiers
 
-| Tier | Setup | Leak / DNS / tracking (v15) | Anonymity (honest) | Best for |
-|------|--------|-------------------------------|--------------------|----------|
-| **A — Default** | `.\install.ps1` (WARP) | **Strong** (~8.5–9/10) | **Moderate** (~7.5–8/10) | Free, zero signup, bypass ISP blocks |
-| **B — Paid VPN** | `.\install.ps1 -CustomConfig your.conf` | **Strong** (same v15 stack) | **High** (~8.5–9.5/10) | Daily privacy; provider choice matters |
-| **C — Sensitive** | Tier A or B + Tor (`Hassas-Tarama.lnk`) | **Strong** + Tor isolation | **Higher for browsing** (~9/10 in Tor) | Investigations, accounts, whistleblowing |
+| Mode | Command | Cost | Leak/DNS (v15) | Anonymity (honest) |
+|------|---------|------|----------------|-------------------|
+| **Default WARP** (recommended) | `.\install.ps1` | Free | **Strong** | ~7.5–8/10 — Cloudflare is VPN operator |
+| **Sensitive (Tor)** | `Hassas-Tarama.lnk` | Free | Strong + Tor | Higher for high-risk browsing only |
+| **Paid VPN** (optional) | `.\install.ps1 -CustomConfig conf` | Monthly | **Strong** (same stack) | ~8.5–9.5/10 if provider is no-log |
 
-### Why a paid WireGuard VPN increases anonymity
+**Daily use:** run `.\install.ps1` once — WARP + v15 stack protects DNS, kill switch, and tracking **without** opening anything extra.
 
-With **default WARP**, traffic enters Cloudflare’s consumer network. That is fine for censorship circumvention and leak safety, but **Cloudflare is always your VPN operator** — they see tunnel metadata and can correlate usage patterns at the edge.
+**Hassas-Tarama (v15.1):** one click installs Tor if missing, hardens, and launches — use only when you need stronger browsing anonymity than WARP alone.
 
-With a **quality paid, no-log WireGuard provider** you typically gain:
+**Paid VPN:** optional upgrade via `-CustomConfig`; same v15 hardening, different tunnel operator. Skip if a monthly subscription is not realistic.
 
-| Benefit | What it means for you |
-|---------|------------------------|
-| **Independent operator** | Exit is not tied to Cloudflare’s consumer WARP product |
-| **No-log policy + audits** | Reputable providers (e.g. Mullvad, IVPN, ProtonVPN WireGuard) minimize retained metadata |
-| **Shared IP pools** | Many users behind the same endpoint IP — harder to single you out |
-| **Jurisdiction choice** | Pick a provider and server country aligned with your threat model |
-| **Fixed WireGuard config** | You control which server you land on; kill switch still blocks if tunnel drops |
-
-**v15 privacy stack applies in both modes:** system DNS lock, dnscrypt (Quad9, `require_nolog`), browser policies, LLMNR/NetBIOS off, optional Tor for sensitive sessions. You are not “starting over” — you are **replacing the tunnel endpoint** while keeping the same hardening.
-
-### Recommended path: paid VPN + this kill switch
-
-1. Subscribe to a **paid WireGuard-capable VPN** with a clear no-log policy and public audit (avoid free VPNs for anonymity — they often monetize traffic).
-2. Download the provider’s **WireGuard `.conf`** (one file per server/location).
-3. Install with custom mode (Administrator PowerShell):
+### Post-install live gate (optional)
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1 -CustomConfig "C:\path\to\mullvad-wireguard.conf" -NoPause
+.\scripts\live-smoke-test.ps1   # read-only; PASS on installed PC, SKIP on GitHub runners
 ```
 
-4. Apply v15 privacy if upgrading from an older install:
+### Optional paid VPN setup
 
 ```powershell
-.\install.ps1 -StrongPrivacyUpgrade -NoPause
+.\install.ps1 -CustomConfig "C:\path\to\provider-wireguard.conf" -NoPause
 ```
-
-5. Verify:
-
-```powershell
-.\scripts\privacy-audit.ps1    # expect STRONG
-.\scripts\safe-live-verify.ps1 # 77/77
-```
-
-6. For high-risk browsing only: desktop **Hassas-Tarama** shortcut (Tor Browser) — not for everyday sites.
-
-### What paid VPN does *not* magically fix
-
-- Your **ISP** still sees an encrypted tunnel (metadata: “VPN in use”) — use bridge/obfuscation only if your provider offers it.
-- **Browser fingerprinting** and **logged-in accounts** can deanonymize you regardless of VPN.
-- **Tor over any VPN** still has operator-specific threat models; use Tor only when you need it.
-- We do **not** endorse or affiliate with any provider — choose based on audits, jurisdiction, and WireGuard support.
-
-### Switching from WARP to a paid VPN
-
-Re-run install with `-CustomConfig`. The script replaces the tunnel service, firewall server allow rules, and monitor/repair scripts for your endpoint. WARP-specific files (`wgcf.exe`) are skipped in custom mode.
 
 ---
 
@@ -352,12 +317,15 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v15.0 (production — current)
-- **Strong privacy:** system DNS lock (all adapters `127.0.0.1`), LLMNR/NetBIOS off, quad9-only dnscrypt (`require_nolog`)
-- `KS-Dnscrypt-EXE` firewall rule, `sensitive-mode.ps1` + **Hassas-Tarama.lnk** (Tor sensitive browsing)
-- **Docs:** paid WireGuard VPN + `-CustomConfig` for higher anonymity vs default WARP
-- Upgrade: `.\install.ps1 -StrongPrivacyUpgrade -NoPause` · Recovery: `.\scripts\restore-full-stack.ps1`
-- Gates: `privacy-audit.ps1` (STRONG), `leak-audit.ps1`, `safe-live-verify.ps1` (77 checks)
+### v15.1 (production — current)
+- **`lib/` modular install** — same `.\install.ps1` entry point; 8 dot-sourced modules
+- **WARP-first docs** — free default; paid VPN optional; Tor for sensitive sessions only
+- **One-step Hassas-Tarama** — `ensure-tor-sensitive.ps1` auto-installs Tor if missing
+- **Optional CI live-smoke** — `live-smoke-test.ps1` (SKIP-safe on GitHub runners)
+- See **[docs/releases/v15.1.md](docs/releases/v15.1.md)**
+
+### v15.0
+- **Strong privacy:** DNS lock, LLMNR/NetBIOS off, quad9-only dnscrypt, leak-sentinel v15
 - See **[docs/releases/v15.0.md](docs/releases/v15.0.md)**
 
 ### v14.0

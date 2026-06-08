@@ -1,0 +1,35 @@
+name: Live Smoke (optional)
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_stack:
+        description: 'Fail if production WireGuard stack not detected on runner'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    name: Live smoke (skip-safe on GitHub runners)
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Live smoke test
+        shell: pwsh
+        run: |
+          $arg = if ('${{ inputs.require_stack }}' -eq 'true') { '-RequireStack' } else { '' }
+          if ($arg) {
+            ./scripts/live-smoke-test.ps1 -RequireStack
+          } else {
+            ./scripts/live-smoke-test.ps1
+          }
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            throw "live-smoke-test.ps1 failed with exit code $LASTEXITCODE"
+          }

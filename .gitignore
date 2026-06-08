@@ -8,6 +8,23 @@ wgcf.exe
 *.msi
 *.zip
 
+# Dev / bisect / emergency (never ship)
+scripts/parse-bisect*.ps1
+scripts/parse-any.ps1
+scripts/emergency-now.ps1
+scripts/test-v10.6.ps1
+scripts/split-install-lib.ps1
+scripts/wrap-install-lib.ps1
+install.ps1.bak
+
+# Local install run artifacts
+install-run*.log
+install-*.log
+*-upgrade*.log
+restore-full-stack.log
+strong-privacy-upgrade*.log
+privacy-upgrade.log
+
 # Windows
 Thumbs.db
 Desktop.ini

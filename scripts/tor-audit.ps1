@@ -35,7 +35,7 @@ function Test-Socks9150 {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  TOR AUDIT (v14 - read-only)" -ForegroundColor Cyan
+Write-Host "  TOR AUDIT (v15.1 - read-only)" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $reg = Get-ItemProperty $REG -EA SilentlyContinue
@@ -44,9 +44,11 @@ Assert (Test-Path 'C:\WireGuard\tor-hardening-guard.ps1') 'tor-hardening-guard.p
 Assert (Test-Path 'C:\WireGuard\tor-connectivity-monitor.ps1') 'tor-connectivity-monitor.ps1 deployed'
 
 $roots = Get-TorRoots
+$ensureDeployed = (Test-Path 'C:\WireGuard\ensure-tor-sensitive.ps1') -or (Test-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\ensure-tor-sensitive.ps1'))
+Assert $ensureDeployed 'ensure-tor-sensitive.ps1 available (one-step Hassas-Tarama)'
+
 if ($roots.Count -eq 0) {
-    Write-Host '  [WARN] Tor Browser not installed - optional for sensitive browsing' -ForegroundColor Yellow
-    Write-Host "  Install from https://www.torproject.org/download/ then re-run -TorUpgradeOnly" -ForegroundColor Gray
+    Write-Host '  [WARN] Tor Browser not installed - run Hassas-Tarama.lnk (auto-installs Tor)' -ForegroundColor Yellow
     exit 0
 }
 

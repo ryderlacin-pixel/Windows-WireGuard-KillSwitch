@@ -42,7 +42,7 @@ Scripts:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/publish-releases.ps1` | Create/update v10.0, v10.1, v10.4 releases (reviewer notes) |
+| `scripts/publish-releases.ps1` | Create/update releases (v10.x–v15.1); use `-Only v15.1` for one tag |
 | `scripts/github-visibility.ps1` | Topics, Discussions, releases, profile bio (all-in-one) |
 
 `publish-releases.ps1` is the fastest path when you only need release pages updated.
