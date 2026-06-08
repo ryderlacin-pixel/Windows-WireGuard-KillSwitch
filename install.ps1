@@ -408,8 +408,15 @@ function Update-GpoScriptsIni($iniPath, $scriptPath) {
     $content | Set-Content $iniPath -Encoding Unicode -Force
 }
 
-function Write-GuardBackups {
+function Unlock-GuardDirForWrite {
     New-Item -ItemType Directory -Path $GUARD_DIR -Force -EA SilentlyContinue | Out-Null
+    attrib -H -S $GUARD_DIR 2>$null | Out-Null
+    Get-ChildItem $GUARD_DIR -File -EA SilentlyContinue | ForEach-Object { attrib -H -S $_.FullName 2>$null | Out-Null }
+    icacls $GUARD_DIR /grant "BUILTIN\Administrators:(OI)(CI)F" /grant "NT AUTHORITY\SYSTEM:(OI)(CI)F" /T /C /Q 2>$null | Out-Null
+}
+
+function Write-GuardBackups {
+    Unlock-GuardDirForWrite
     $guardFiles = @(
         $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
         $REBOOT_VERIFY_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1
@@ -439,6 +446,7 @@ function Write-GuardBackups {
     Get-ChildItem $GUARD_DIR -File -EA SilentlyContinue | ForEach-Object { attrib +H +S $_.FullName 2>$null | Out-Null }
 
     New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'Version' '11.3' -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GuardDir' $GUARD_DIR -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'StartupLnk' $STARTUP_LNK -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GpoScript' $GPO_SCRIPT -Force
@@ -2089,15 +2097,15 @@ Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -notin @('killswitch.l
     ForEach-Object { attrib +S +H $_.FullName }
 OK "ACL set + files hidden"
 
+New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.3"                              -Force
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
 $taskXml = Export-ScheduledTask -TaskName $TASK_MONITOR
 if ($taskXml) {
     $taskXml | Set-Content "$INSTALL_DIR\WG-KillSwitch-backup.xml" -Encoding UTF8 -Force
     $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($taskXml))
-    New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TaskXML"       $b64                                -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.3"                              -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  (Join-Path $PSScriptRoot 'scripts') -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RebootVerifyPath" $REBOOT_VERIFY_PS1             -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "InstalledDate" (Get-Date -f "yyyy-MM-dd HH:mm:ss") -Force
@@ -2107,6 +2115,16 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerIP"      $(if ($CUSTOM_MODE) { $CustomEndpointIP } else { $serverIPs }) -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerPort"    (Get-ServerPort)                    -Force
     OK "Registry backup written"
+} else { WARN "WG-KillSwitch task XML export failed" }
+foreach ($pair in @(
+    @{ Name = 'TaskXMLRepair'; Task = $TASK_REPAIR },
+    @{ Name = 'TaskXMLRebootVerify'; Task = $TASK_REBOOT_VERIFY }
+)) {
+    $tx = Export-ScheduledTask -TaskName $pair.Task -EA SilentlyContinue
+    if ($tx) {
+        $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($tx))
+        Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" $pair.Name $b64 -Force
+    }
 }
 
 $runKeyValue = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$REPAIR_PS1`""
@@ -2130,12 +2148,7 @@ if (Test-Path $NSSM) {
     & $NSSM set        $WG_SVC_NAME AppRestartDelay 5000 2>$null | Out-Null
     & sc.exe failure   $WG_SVC_NAME reset=60 actions=restart/5000/restart/10000/restart/30000 2>$null | Out-Null
     & sc.exe sdset     $WG_SVC_NAME "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)" 2>$null | Out-Null
-    & $NSSM start      $WG_SVC_NAME 2>$null | Out-Null
-    Start-Sleep 5
-    $svcStatus = & sc.exe query $WG_SVC_NAME 2>$null
-    if ($svcStatus -match "RUNNING")     { OK "WGKillSwitchSvc: RUNNING (delayed-auto)" }
-    elseif ($svcStatus -match "PENDING") { OK "WGKillSwitchSvc: STARTING..." }
-    else { WARN "WGKillSwitchSvc did not start - other layers still active" }
+    OK "WGKillSwitchSvc: installed (start deferred to STEP 19)"
 } else { WARN "NSSM not available - service layer skipped" }
 
 # ================================================================
@@ -2252,6 +2265,13 @@ Disable-AllIPv6Bindings
 Write-KurtarScript
 Clear-InstallLock
 OK "Install lock cleared - kill switch may now block if tunnel fails"
+if (Test-Path $NSSM) {
+    & $NSSM start $WG_SVC_NAME 2>$null | Out-Null
+    Start-Sleep 3
+    $svcStatus = & sc.exe query $WG_SVC_NAME 2>$null
+    if ($svcStatus -match 'RUNNING') { OK 'WGKillSwitchSvc: RUNNING (delayed-auto)' }
+    else { WARN 'WGKillSwitchSvc: start pending - repair layers still active' }
+}
 Stop-AllMonitorProcs
 Remove-Item "$INSTALL_DIR\monitor.pid" -Force -EA SilentlyContinue
 Start-Sleep 2
@@ -2320,9 +2340,14 @@ $wmiK = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -E
 if ($wmiK) { OK "WMI Subscription: ACTIVE" } else { WARN "WMI Subscription: missing"; $warnings++ }
 if (Test-Path $STARTUP_LNK) { OK "Startup shortcut: present" } else { WARN "Startup shortcut: missing"; $warnings++ }
 if (Test-Path $GPO_SCRIPT)  { OK "GPO script: present" }       else { WARN "GPO script: missing";       $warnings++ }
+if (Test-Path $ANTI_TAMPER_PS1) { OK "anti-tamper.ps1: present" } else { WARN "anti-tamper.ps1: missing"; $warnings++ }
+if (Test-Path $GUARD_DIR) {
+    $guardN = (Get-ChildItem $GUARD_DIR -File -Force -EA SilentlyContinue | Measure-Object).Count
+    if ($guardN -ge 5) { OK "Guard vault: $guardN files" } else { WARN "Guard vault: only $guardN file(s)"; $warnings++ }
+} else { WARN "Guard vault: missing"; $warnings++ }
 
 $reg = Get-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" -EA SilentlyContinue
-if ($reg.TaskXML) { OK "Registry backup: v$($reg.Version)" } else { WARN "Registry backup: missing"; $warnings++ }
+if ($reg.TaskXML -and $reg.TaskXMLRepair) { OK "Registry backup: v$($reg.Version)" } else { WARN "Registry backup: incomplete"; $warnings++ }
 
 $ipv6Rule = Get-NetFirewallRule -DisplayName "KS-Block-IPv6-Out" -EA SilentlyContinue
 if ($ipv6Rule -and $ipv6Rule.Enabled -eq "True") { OK "IPv6 block: ACTIVE" } else { WARN "IPv6 block: inactive"; $warnings++ }
