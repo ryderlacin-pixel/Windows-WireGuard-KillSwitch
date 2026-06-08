@@ -1,10 +1,10 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.3.1)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.3.2)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
 #
-# AI CONNECTION INVARIANT (v15.3.1 - NEVER violate):
+# AI CONNECTION INVARIANT (v15.3.2 - NEVER violate):
 # If install or -DryRun kills internet, the user's Cursor/AI session dies too.
 # - Pre-flight quiesce runs FIRST on every invocation (including -DryRun).
 # - -DryRun is read-only preview only; MainSteps 0-20 NEVER execute.

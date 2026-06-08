@@ -132,7 +132,7 @@ Assert $healthy 'KillSwitch: tunnel + TCP internet (SafeToOpen)'
 if (-not $healthy) { Write-Host "  [WARN] System unhealthy - read-only audits only" -ForegroundColor Yellow }
 
 $ksReg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($ksReg -and ($ksReg.Version -ge '15.0' -or ($ksReg.Version -ge '14.0' -and $ksReg.V15StrongPrivacy -eq '1') -or ($ksReg.Version -ge '13.5' -and $ksReg.V14DnsLeak -eq '1'))) "Registry version 15.0+ or phased (got $($ksReg.Version))"
+Assert ($ksReg -and ($ksReg.Version -match '^15\.' -or $ksReg.Version -ge '15.0' -or ($ksReg.Version -ge '14.0' -and $ksReg.V15StrongPrivacy -eq '1') -or ($ksReg.Version -ge '13.5' -and $ksReg.V14DnsLeak -eq '1'))) "Registry version 15.0+ or phased (got $($ksReg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) 'kurtar.bat removed'
@@ -171,7 +171,7 @@ Assert ($rep -notmatch 'function Enable-Block') 'repair has no Enable-Block func
 Assert ($wd -match 'Invoke-GentleUnbrick') 'watchdog has gentle unbrick'
 Assert ($wd -match 'Invoke-DeepUnbrick') 'watchdog has deep unbrick (no teardown)'
 Assert ($wd -notmatch 'kurtar') 'watchdog has no kurtar references'
-Assert ($gpo -match 'v15\.0|v14\.0|v13\.5') 'GPO script version (v15/v14 or v13.5 phased)'
+Assert ($gpo -match 'v15\.|v14\.0|v13\.5') 'GPO script version (v15/v14 or v13.5 phased)'
 Assert ($gpo -match 'never blocks') 'GPO has no block authority'
 
 foreach ($tn in @('WG-KillSwitch', 'WG-RepairTask', 'WG-RebootVerify', 'WG-InternetWatchdog')) {

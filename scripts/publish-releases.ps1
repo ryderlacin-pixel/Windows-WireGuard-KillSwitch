@@ -97,6 +97,7 @@ $releases = @{
     "v15.2.9" = @{ name = "v15.2.9-FINAL - Final line audit gate, 1008 assertions, 0 ERROR/WARN" }
     "v15.3.0" = @{ name = "v15.3.0 - Internet-safe install (KillSwitchArmed gate, DNS lock manual-only)" }
     "v15.3.1" = @{ name = "v15.3.1 - AI-safe DryRun preview-only + pre-flight quiesce" }
+    "v15.3.2" = @{ name = "v15.3.2 - Server IP scope fix + emergency-reset upgrade hardening" }
 }
 
 function Get-ReleaseBody($tag) {

@@ -1,4 +1,4 @@
-# Comprehensive offline test suite - v15.3.1 rigor gate (no hollow tests)
+# Comprehensive offline test suite - v15.3.2 rigor gate (no hollow tests)
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -55,7 +55,7 @@ function Test-ExtractedScript {
 }
 
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Kill Switch FULL TEST SUITE (v15.3.1 - rigor gate)' -ForegroundColor Cyan
+Write-Host '  Kill Switch FULL TEST SUITE (v15.3.2 - rigor gate)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 $libDir = Join-Path $repoRoot 'lib'
@@ -83,7 +83,7 @@ $v15StackRaw = $contentMap['scripts/install-v15-privacy-stack.ps1']
 $v14StackRaw = $contentMap['scripts/install-v14-stack.ps1']
 
 # [2] File-scoped patterns (not hollow rawCombined)
-Write-Host "[2/17] File-scoped v15.3.1 patterns" -ForegroundColor Yellow
+Write-Host "[2/17] File-scoped v15.3.2 patterns" -ForegroundColor Yellow
 foreach ($row in (Get-FileScopedPatternMatrix)) {
     foreach ($item in (Get-PatternMatrixEntries $row)) {
         $found = $false

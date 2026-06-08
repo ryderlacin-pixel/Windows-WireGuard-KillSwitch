@@ -2,9 +2,9 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v15.3.1](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.3.1)
+**Current release:** [v15.3.2](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.3.2)
 
-This document answers reviewer questions from v10.2-v10.4 and summarizes v11-v15 production changes. **v15.3.1** is current production (AI-safe DryRun, pre-flight quiesce, 1030+ offline assertions, 0 ERROR/WARN). **v15.2** added boot-safety in [`lib/Install-SafeNetwork.ps1`](../lib/Install-SafeNetwork.ps1) after a confirmed v15.1 reboot deadlock on real hardware. [`install.ps1`](../install.ps1) remains the single entry point.
+This document answers reviewer questions from v10.2-v10.4 and summarizes v11-v15 production changes. **v15.3.2** is current production (AI-safe DryRun, server IP scope fix, 1045+ offline assertions, 0 ERROR/WARN). **v15.2** added boot-safety in [`lib/Install-SafeNetwork.ps1`](../lib/Install-SafeNetwork.ps1) after a confirmed v15.1 reboot deadlock on real hardware. [`install.ps1`](../install.ps1) remains the single entry point.
 
 ---
 
@@ -246,6 +246,7 @@ All reports must be in **English**.
 | v15.2.9 | Final line audit (dot-by-dot), file-coverage gate, behavior/reboot sims, 1008+ assertion suite |
 | v15.3.0 | KillSwitchArmed gate, DNS lock manual-only, DryRun skipped steps 7–20 |
 | v15.3.1 | **AI Connection Invariant:** pre-flight quiesce + DryRun preview-only (steps 0–20 never run) |
+| v15.3.2 | **Server IP scope fix:** `$script:serverIPs` for monitor/registry; emergency-reset upgrade attrib fix |
 
 See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases) for full notes per version.
 

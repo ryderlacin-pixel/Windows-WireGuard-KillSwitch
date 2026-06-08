@@ -14,7 +14,7 @@ $functionInventory = @{}
 $errors = 0
 $warns = 0
 $passed = 0
-$CURRENT_VER = '15.3.1'
+$CURRENT_VER = '15.3.2'
 $CURRENT_ASSERTIONS = '1045'
 
 function Get-RuleStringList {
@@ -49,7 +49,7 @@ function Add-Finding {
 
 function Test-CurrentDocClaims {
     param([string]$RelPath, [string]$Content, [string[]]$Lines)
-    if ($RelPath -notin @('README.md', 'docs/releases/v15.3.1.md', 'docs/releases/v15.3.0.md', 'CONTRIBUTING.md', 'docs/PROMOTION.md', 'docs/LAUNCH_CHECKLIST.md', 'docs/CODE_REVIEW.md', 'docs/GITHUB_TOKEN.md')) { return }
+    if ($RelPath -notin @('README.md', 'docs/releases/v15.3.2.md', 'docs/releases/v15.3.1.md', 'docs/releases/v15.3.0.md', 'CONTRIBUTING.md', 'docs/PROMOTION.md', 'docs/LAUNCH_CHECKLIST.md', 'docs/CODE_REVIEW.md', 'docs/GITHUB_TOKEN.md')) { return }
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         $ln = $Lines[$i]
         $n = $i + 1
@@ -237,8 +237,8 @@ foreach ($entry in $manifest) {
             if ($rel -eq 'README.md' -and $content -notmatch '15\.3\.1') {
                 Add-Finding $rel 0 'WARN' 'readme_version' "README does not mention $CURRENT_VER prominently"
             }
-            if ($rel -eq "docs/releases/v15.3.1.md" -and $content -notmatch '1045') {
-                Add-Finding $rel 0 'WARN' 'release_test_count' 'v15.3.1.md should document 1045 assertion gate'
+            if ($rel -eq "docs/releases/v15.3.2.md" -and $content -notmatch '1045') {
+                Add-Finding $rel 0 'WARN' 'release_test_count' 'v15.3.2.md should document 1045 assertion gate'
             }
         }
     }
@@ -293,8 +293,8 @@ $install = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -notmatch "\`$WG_KS_VERSION = '$CURRENT_VER'") {
     Add-Finding 'lib/Install-Constants.ps1' 0 'ERROR' 'version_mismatch' "WG_KS_VERSION must be $CURRENT_VER"
 }
-if ($install -notmatch 'v15\.3\.1') {
-    Add-Finding 'install.ps1' 0 'ERROR' 'version_mismatch' 'install.ps1 header must reference v15.3.1'
+if ($install -notmatch 'v15\.3\.2') {
+    Add-Finding 'install.ps1' 0 'ERROR' 'version_mismatch' 'install.ps1 header must reference v15.3.2'
 }
 if ($install -notmatch 'Invoke-PreFlightInternetGuard') {
     Add-Finding 'install.ps1' 0 'ERROR' 'ai_invariant' 'install.ps1 must call Invoke-PreFlightInternetGuard (AI Connection Invariant)'

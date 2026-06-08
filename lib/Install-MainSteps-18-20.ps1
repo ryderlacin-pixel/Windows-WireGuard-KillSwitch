@@ -116,11 +116,15 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $emerBat = Join-Path $repoRoot 'emergency-reset.bat'
 $emerPs1 = Join-Path $repoRoot 'scripts\emergency-reset.ps1'
 if (Test-Path $emerPs1) {
-    Copy-Item $emerPs1 "$INSTALL_DIR\emergency-reset.ps1" -Force
+    $emerDest = Join-Path $INSTALL_DIR 'emergency-reset.ps1'
+    if (Test-Path $emerDest) { attrib -S -H $emerDest 2>$null | Out-Null }
+    Copy-Item $emerPs1 $emerDest -Force
     OK "emergency-reset.ps1 deployed to $INSTALL_DIR"
 }
 if (Test-Path $emerBat) {
-    Copy-Item $emerBat "$INSTALL_DIR\emergency-reset.bat" -Force
+    $batDest = Join-Path $INSTALL_DIR 'emergency-reset.bat'
+    if (Test-Path $batDest) { attrib -S -H $batDest 2>$null | Out-Null }
+    Copy-Item $emerBat $batDest -Force
     OK "emergency-reset.bat deployed to $INSTALL_DIR"
 }
 Write-GuardBackups

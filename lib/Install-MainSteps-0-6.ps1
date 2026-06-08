@@ -167,8 +167,10 @@ Write-Step "STEP 2b - PRE-CACHE + INSTALL LOCK (internet required)"
 # ================================================================
 # Resolve server IPs while internet is still available; set install lock so
 # monitor/repair never cut connectivity during the rest of install.ps1.
-$serverIPs = Get-ServerIPs
-$serverPort = Get-ServerPort
+$script:serverIPs = Get-ServerIPs
+$script:serverPort = Get-ServerPort
+$serverIPs = $script:serverIPs
+$serverPort = $script:serverPort
 Set-InstallLock
 Write-Info "Install lock set; clearing legacy rescue artifacts..."
 Remove-KurtarArtifacts

@@ -98,7 +98,8 @@ if ($taskXml) {
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "CustomMode"    ([bool]$CUSTOM_MODE)                -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ConfigPath"    $CONFIG                             -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TunnelName"    $TUNNEL_NAME                        -Force
-    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerIP"      $(if ($CUSTOM_MODE) { $CustomEndpointIP } else { $serverIPs }) -Force
+    $regServerIp = if ($CUSTOM_MODE) { $CustomEndpointIP } elseif ($script:serverIPs) { $script:serverIPs } else { $serverIPs }
+    Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerIP"      $regServerIp -Force
     Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ServerPort"    (Get-ServerPort)                    -Force
     OK "Registry backup written"
 } else { WARN "WG-KillSwitch task XML export failed" }

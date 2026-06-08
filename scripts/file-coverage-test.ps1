@@ -191,7 +191,7 @@ Write-Host '[H2] Release notes + ci.ps1 + emergency.bat' -ForegroundColor Yellow
 if ($bat) {
     Assert-Coverage ($bat -match 'EnableExtensions') 'emergency-reset.bat: setlocal' 'emergency-reset.bat'
 }
-foreach ($relTag in @('v15.3.1', 'v15.3.0')) {
+foreach ($relTag in @('v15.3.2', 'v15.3.1', 'v15.3.0')) {
     $releasePath = Join-Path $repoRoot "docs\releases\$relTag.md"
     if (Test-Path $releasePath) {
         $relNote = Get-Content -LiteralPath $releasePath -Raw -Encoding UTF8

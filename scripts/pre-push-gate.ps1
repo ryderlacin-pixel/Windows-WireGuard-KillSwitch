@@ -30,8 +30,8 @@ Write-Host "`n>> Version consistency" -ForegroundColor Yellow
 $constants = Get-Content (Join-Path $repoRoot 'lib\Install-Constants.ps1') -Raw -Encoding UTF8
 $install   = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -match "\`$WG_KS_VERSION = '([^']+)'") { $ver = $Matches[1] } else { $ver = '' }
-Assert-Gate ($ver -eq '15.3.1') "WG_KS_VERSION = 15.3.1 (got '$ver')"
-Assert-Gate ($install -match 'v15\.3\.1') 'install.ps1 header version'
+Assert-Gate ($ver -eq '15.3.2') "WG_KS_VERSION = 15.3.2 (got '$ver')"
+Assert-Gate ($install -match 'v15\.3\.2') 'install.ps1 header version'
 Assert-Gate ($install -match 'Invoke-PreFlightInternetGuard') 'AI invariant: pre-flight quiesce'
 Assert-Gate ($install -match 'Invoke-InstallDryRunPreview') 'AI invariant: DryRun preview-only'
 Assert-Gate (-not ($constants -match '[^\x09\x0A\x0D\x20-\x7E]')) 'Install-Constants.ps1: ASCII-only (no mojibake)'
@@ -80,7 +80,7 @@ else { Write-Host '  [OK]   final-line-audit.ps1 (0 ERROR)' -ForegroundColor Gre
 
 # 6) Release notes exist for current version
 Write-Host "`n>> Release artifact" -ForegroundColor Yellow
-Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.3.1.md')) 'docs/releases/v15.3.1.md exists'
+Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.3.2.md')) 'docs/releases/v15.3.2.md exists'
 Assert-Gate ($main06 -match 'must never run in DryRun') 'MainSteps 0-6: DryRun hard guard'
 
 Write-Host ''

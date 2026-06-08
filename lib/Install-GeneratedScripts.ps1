@@ -18,8 +18,8 @@ $monitorTunnelSvc  = $TUNNEL_SVC
 $monitorTunnelName = $TUNNEL_NAME
 $monitorConfig     = $CONFIG
 # Use already-resolved values from STEP 6 (no second API call)
-$monitorServerIp   = $serverIPs
-$monitorPort       = $serverPort
+$monitorServerIp   = if ($script:serverIPs) { $script:serverIPs } elseif ($serverIPs) { $serverIPs } else { '162.159.192.0/24,162.159.193.0/24,162.159.195.0/24,104.16.0.0/13' }
+$monitorPort       = if ($script:serverPort) { $script:serverPort } elseif ($serverPort) { $serverPort } else { '2408,854' }
 $monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 $monitorKsVersion  = $WG_KS_VERSION
 
@@ -563,7 +563,7 @@ $repairTunnelSvc  = $TUNNEL_SVC
 $repairTunnelName = $TUNNEL_NAME
 $repairConfig     = $CONFIG
 $repairSvcName    = $WG_SVC_NAME
-$repairServerPort = $serverPort
+$repairServerPort = if ($script:serverPort) { $script:serverPort } elseif ($serverPort) { $serverPort } else { '2408,854' }
 
 # NOTE: repair.ps1 uses a single-quoted here-string (@' '@) for all static content.
 # Variables that must expand at install-time are injected via direct string concatenation.

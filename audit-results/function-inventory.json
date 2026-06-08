@@ -49,7 +49,9 @@
                                          "ConvertTo-JsonUtf8",
                                          "Invoke-GH",
                                          "Get-ReleaseBody",
-                                         "Publish-Release"
+                                         "Publish-Release",
+                                         "Upload-ReleaseAsset",
+                                         "Get-DefaultAssetPaths"
                                      ],
     "scripts/system-audit.ps1":  {
 

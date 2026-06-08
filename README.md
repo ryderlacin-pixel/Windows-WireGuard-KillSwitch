@@ -11,13 +11,13 @@
 
 Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1+).
 
-**v15.3.1** is the current production release (AI-safe DryRun + internet-safe install — see [release notes](docs/releases/v15.3.1.md)).
+**v15.3.2** is the current production release (AI-safe DryRun + server IP fix — see [release notes](docs/releases/v15.3.2.md)).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.3.1](docs/releases/v15.3.1.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.3.2](docs/releases/v15.3.2.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
 
 **Internet stuck?** Run **`emergency-reset.bat`** as Administrator (repo root or `C:\WireGuard\`) — removes `KS-*` rules, resets firewall/IP stack, re-enables physical adapters. Then wait 1–5 minutes for `WG-InternetWatchdog`, or re-run `install.ps1`.
 
