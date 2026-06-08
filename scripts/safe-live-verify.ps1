@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v14.0 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v15.0 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -90,7 +90,9 @@ function Test-ScriptIntegrityVault {
         @{ File = 'C:\WireGuard\repair.ps1'; Key = 'Hash_repair.ps1' },
         @{ File = 'C:\WireGuard\privacy-hardening-guard.ps1'; Key = 'Hash_privacy-hardening-guard.ps1' },
         @{ File = 'C:\WireGuard\dnscrypt-guard.ps1'; Key = 'Hash_dnscrypt-guard.ps1' },
-        @{ File = 'C:\WireGuard\leak-sentinel.ps1'; Key = 'Hash_leak-sentinel.ps1' }
+        @{ File = 'C:\WireGuard\leak-sentinel.ps1'; Key = 'Hash_leak-sentinel.ps1' },
+        @{ File = 'C:\WireGuard\dns-lockdown-guard.ps1'; Key = 'Hash_dns-lockdown-guard.ps1' },
+        @{ File = 'C:\WireGuard\network-privacy-guard.ps1'; Key = 'Hash_network-privacy-guard.ps1' }
     )) {
         $expected = $reg.$($pair.Key)
         if ([string]::IsNullOrWhiteSpace($expected)) { continue }
@@ -121,8 +123,8 @@ function Get-MonitorCount {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  SAFE LIVE VERIFY (v14.0 - non-disruptive)" -ForegroundColor Cyan
-Write-Host "  Metrics: KillSwitch | DnsLeak | Tor" -ForegroundColor Cyan
+Write-Host "  SAFE LIVE VERIFY (v15.0 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  Metrics: KillSwitch | DnsLeak | PrivacyStrong | Tor" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $healthy = Test-SafeToOpen
@@ -130,7 +132,7 @@ Assert $healthy 'KillSwitch: tunnel + TCP internet (SafeToOpen)'
 if (-not $healthy) { Write-Host "  [WARN] System unhealthy - read-only audits only" -ForegroundColor Yellow }
 
 $ksReg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($ksReg -and ($ksReg.Version -ge '14.0' -or ($ksReg.Version -ge '13.5' -and $ksReg.V14DnsLeak -eq '1'))) "Registry version 14.0+ or phased v13.5+V14DnsLeak (got $($ksReg.Version))"
+Assert ($ksReg -and ($ksReg.Version -ge '15.0' -or ($ksReg.Version -ge '14.0' -and $ksReg.V15StrongPrivacy -eq '1') -or ($ksReg.Version -ge '13.5' -and $ksReg.V14DnsLeak -eq '1'))) "Registry version 15.0+ or phased (got $($ksReg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) 'kurtar.bat removed'
@@ -150,7 +152,7 @@ $svc = Get-Content 'C:\WireGuard\service-monitor.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
 $wd = Get-Content 'C:\WireGuard\internet-watchdog.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v14\.0|Monitor v14|v13\.5|Monitor v13') 'monitor.ps1 version (v14 or v13.5 phased)'
+Assert ($mon -match 'v15\.0|v14\.0|Monitor v15|Monitor v14|v13\.5|Monitor v13') 'monitor.ps1 version (v15/v14 or v13.5 phased)'
 Assert ($mon -match 'Test-TunnelAdapterUp') 'monitor dual-check: service + adapter'
 Assert ($mon -match 'Test-BootGrace') 'monitor has BootGrace fail-open'
 Assert ($mon -match 'Test-BlockAllowed') 'monitor has block-allowed guard'
@@ -158,7 +160,9 @@ Assert ($mon -notmatch 'Test-Dns') 'monitor SafeToOpen excludes DNS gate'
 Assert ($mon -match 'no re-block') 'monitor recovery never re-blocks'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
 Assert ($mon -notmatch 'kurtar') 'monitor has no kurtar references'
-Assert ($rep -match 'v14\.0|Repair Script v14|v13\.5|Repair Script v13') 'repair.ps1 version (v14 or v13.5 phased)'
+Assert ($rep -match 'v15\.0|v14\.0|Repair Script v15|Repair Script v14|v13\.5|Repair Script v13') 'repair.ps1 version (v15/v14 or v13.5 phased)'
+Assert ($rep -match 'dns-lockdown-guard\.ps1') 'repair re-applies dns-lockdown guard'
+Assert ($rep -match 'network-privacy-guard\.ps1') 'repair re-applies network-privacy guard'
 Assert ($rep -match 'privacy-hardening-guard\.ps1') 'repair re-applies privacy guard'
 Assert ($rep -match 'dnscrypt-guard\.ps1') 'repair re-applies dnscrypt guard'
 Assert ($rep -match 'leak-sentinel\.ps1') 'repair runs leak-sentinel'
@@ -167,7 +171,7 @@ Assert ($rep -notmatch 'function Enable-Block') 'repair has no Enable-Block func
 Assert ($wd -match 'Invoke-GentleUnbrick') 'watchdog has gentle unbrick'
 Assert ($wd -match 'Invoke-DeepUnbrick') 'watchdog has deep unbrick (no teardown)'
 Assert ($wd -notmatch 'kurtar') 'watchdog has no kurtar references'
-Assert ($gpo -match 'v14\.0|v13\.5') 'GPO script version (v14 or v13.5 phased)'
+Assert ($gpo -match 'v15\.0|v14\.0|v13\.5') 'GPO script version (v15/v14 or v13.5 phased)'
 Assert ($gpo -match 'never blocks') 'GPO has no block authority'
 
 foreach ($tn in @('WG-KillSwitch', 'WG-RepairTask', 'WG-RebootVerify', 'WG-InternetWatchdog')) {
@@ -223,6 +227,31 @@ if ($ksReg.V14DnsLeak -eq '1' -or (Test-Path 'C:\WireGuard\dnscrypt-proxy\dnscry
     Assert ($cfgDns -match '127\.0\.0\.1') 'DnsLeak: WireGuard DNS = 127.0.0.1'
     $leakSt = $ksReg.LeakState
     if ($leakSt) { Assert ($leakSt -eq 'HEALTHY') "DnsLeak: LeakState $leakSt" }
+}
+
+# --- v15 PrivacyStrong metric ---
+if ($ksReg.V15StrongPrivacy -eq '1' -or $ksReg.Version -ge '15.0') {
+    Assert (Test-Path 'C:\WireGuard\dns-lockdown-guard.ps1') 'PrivacyStrong: dns-lockdown-guard.ps1 deployed'
+    Assert (Test-Path 'C:\WireGuard\network-privacy-guard.ps1') 'PrivacyStrong: network-privacy-guard.ps1 deployed'
+    $sysLeak = 0
+    $dnsRaw = netsh interface ipv4 show dnsservers 2>&1 | Out-String
+    foreach ($line in ($dnsRaw -split "`r?`n")) {
+        if ($line -match ':\s*(\d+\.\d+\.\d+\.\d+)') {
+            if ($Matches[1] -ne '127.0.0.1') { $sysLeak++ }
+        }
+    }
+    Assert ($sysLeak -eq 0) "PrivacyStrong: all adapter DNS = 127.0.0.1 (leaks=$sysLeak)"
+    $doh = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name EnableAutoDoh -EA SilentlyContinue).EnableAutoDoh
+    Assert ($doh -ne 1) 'PrivacyStrong: Windows DoH auto disabled'
+    $llmnr = (Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast -EA SilentlyContinue).EnableMulticast
+    Assert ($llmnr -ne 1) 'PrivacyStrong: LLMNR disabled'
+    $fwDnscrypt = netsh advfirewall firewall show rule name='KS-Dnscrypt-EXE' 2>&1 | Out-String
+    Assert ($fwDnscrypt -notmatch 'No rules match') 'PrivacyStrong: KS-Dnscrypt-EXE firewall rule'
+    $toml = Get-Content 'C:\WireGuard\dnscrypt-proxy\dnscrypt-proxy.toml' -Raw -EA SilentlyContinue
+    if ($toml) {
+        Assert ($toml -match 'require_nolog\s*=\s*true') 'PrivacyStrong: dnscrypt require_nolog'
+        Assert ($toml -match 'quad9-dnsovertls') 'PrivacyStrong: dnscrypt quad9 only'
+    }
 }
 
 # --- v14 Tor metric (optional) ---

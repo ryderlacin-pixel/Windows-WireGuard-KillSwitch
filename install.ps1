@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v14.0)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.0)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,8 +28,10 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v15.0: strong privacy — system DNS lock (all adapters 127.0.0.1), LLMNR/NetBIOS off,
+#   stricter dnscrypt (require_nolog, quad9 only), KS-Dnscrypt-EXE firewall, sensitive-mode launcher.
 # - v14.0: dnscrypt-proxy (127.0.0.1:53) + Tor Browser hardening + leak-sentinel (read-only);
-#   phased upgrades: -DnsLeakUpgradeOnly / -TorUpgradeOnly / -FullPrivacyUpgrade.
+#   phased upgrades: -DnsLeakUpgradeOnly / -TorUpgradeOnly / -FullPrivacyUpgrade / -StrongPrivacyUpgrade.
 # - v13.5: privacy engineer pass — Privacy Sandbox/DoH/QUIC off, Firefox RFP+, WER reduced,
 #   honest threat-model scores, script SHA256 integrity vault; supply-chain verify in safe-live-verify.
 # - v13.4: privacy hardening — cookies/tracking/fingerprint + Windows telemetry/ads/cloud;
@@ -76,11 +78,12 @@ param(
     [switch]$DnsLeakUpgradeOnly,      # v14: dnscrypt-proxy + WG DNS=127.0.0.1 only
     [switch]$TorUpgradeOnly,          # v14: Tor Browser user.js hardening only
     [switch]$FullPrivacyUpgrade,      # v14: dnscrypt + Tor + leak-sentinel + v13.5 privacy
+    [switch]$StrongPrivacyUpgrade,    # v15: v14 + system DNS lock + network privacy + strict dnscrypt
     [switch]$NoPause                  # skip end pause (CI / automated resume)
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '14.0'
+$WG_KS_VERSION = '15.0'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -124,6 +127,9 @@ $DNSCRYPT_GUARD_PS1 = "$INSTALL_DIR\dnscrypt-guard.ps1"
 $TOR_GUARD_PS1     = "$INSTALL_DIR\tor-hardening-guard.ps1"
 $TOR_MONITOR_PS1   = "$INSTALL_DIR\tor-connectivity-monitor.ps1"
 $LEAK_SENTINEL_PS1 = "$INSTALL_DIR\leak-sentinel.ps1"
+$DNS_LOCKDOWN_GUARD_PS1 = "$INSTALL_DIR\dns-lockdown-guard.ps1"
+$NETWORK_PRIVACY_GUARD_PS1 = "$INSTALL_DIR\network-privacy-guard.ps1"
+$SENSITIVE_MODE_PS1 = "$INSTALL_DIR\sensitive-mode.ps1"
 
 $script:WG_KS_VERSION = $WG_KS_VERSION
 $script:CONFIG = $CONFIG
@@ -136,6 +142,9 @@ $script:DNSCRYPT_GUARD_PS1 = $DNSCRYPT_GUARD_PS1
 $script:TOR_GUARD_PS1 = $TOR_GUARD_PS1
 $script:TOR_MONITOR_PS1 = $TOR_MONITOR_PS1
 $script:LEAK_SENTINEL_PS1 = $LEAK_SENTINEL_PS1
+$script:DNS_LOCKDOWN_GUARD_PS1 = $DNS_LOCKDOWN_GUARD_PS1
+$script:NETWORK_PRIVACY_GUARD_PS1 = $NETWORK_PRIVACY_GUARD_PS1
+$script:INSTALL_DIR = $INSTALL_DIR
 
 # -- Custom mode (full validation in STEP 0) --
 $CUSTOM_MODE = ($CustomConfig -ne "")
@@ -477,6 +486,9 @@ function Get-ChromiumPrivacyDWordProps {
         NetworkPredictionOptions             = 2
         SharingDisabled                      = 1
         PasswordManagerEnabled               = 0
+        AlternateErrorPagesEnabled           = 0
+        SpellCheckServiceEnabled             = 0
+        TranslateEnabled                     = 0
     }
 }
 
@@ -682,6 +694,9 @@ function Install-ScriptIntegrityVault {
     if (Get-Command Extend-ScriptIntegrityVaultV14 -EA SilentlyContinue) {
         Extend-ScriptIntegrityVaultV14
     }
+    if (Get-Command Extend-ScriptIntegrityVaultV15 -EA SilentlyContinue) {
+        Extend-ScriptIntegrityVaultV15
+    }
 }
 
 function Test-PrivacyChromiumPolicy([string]$VendorPath) {
@@ -825,11 +840,17 @@ function Write-GuardBackups {
         $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
         $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1,
         $PRIVACY_GUARD_PS1, $WEBRTC_GUARD_PS1,
-        $DNSCRYPT_GUARD_PS1, $TOR_GUARD_PS1, $TOR_MONITOR_PS1, $LEAK_SENTINEL_PS1
+        $DNSCRYPT_GUARD_PS1, $TOR_GUARD_PS1, $TOR_MONITOR_PS1, $LEAK_SENTINEL_PS1,
+        $DNS_LOCKDOWN_GUARD_PS1, $NETWORK_PRIVACY_GUARD_PS1, $SENSITIVE_MODE_PS1
     )
     foreach ($f in $guardFiles) {
         if (Test-Path $f) {
-            Copy-Item $f (Join-Path $GUARD_DIR (Split-Path $f -Leaf)) -Force
+            $dest = Join-Path $GUARD_DIR (Split-Path $f -Leaf)
+            if (Test-Path $dest) {
+                icacls $dest /grant 'BUILTIN\Administrators:F' /C 2>$null | Out-Null
+                attrib -R -S -H $dest 2>$null | Out-Null
+            }
+            Copy-Item $f $dest -Force
         }
     }
     foreach ($tn in @($TASK_MONITOR, $TASK_REPAIR, $TASK_REBOOT_VERIFY, $TASK_WATCHDOG)) {
@@ -925,6 +946,8 @@ function Get-ServerIPs {
 
 $v14StackPath = Join-Path $PSScriptRoot 'scripts\install-v14-stack.ps1'
 if (Test-Path $v14StackPath) { . $v14StackPath } else { Write-Host ' [WARN] install-v14-stack.ps1 missing - v14 features disabled' -ForegroundColor Yellow }
+$v15StackPath = Join-Path $PSScriptRoot 'scripts\install-v15-privacy-stack.ps1'
+if (Test-Path $v15StackPath) { . $v15StackPath } else { Write-Host ' [WARN] install-v15-privacy-stack.ps1 missing - v15 features disabled' -ForegroundColor Yellow }
 
 # ================================================================
 # ADMIN CHECK
@@ -1069,6 +1092,57 @@ if (Test-Path $main) { & $main }
         Write-Host "  FULL PRIVACY UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
     }
     Write-Host "  Restart WG tunnel + browsers. Tor = sensitive use only." -ForegroundColor Gray
+    if (-not $NoPause) { pause }
+    exit 0
+}
+
+if ($StrongPrivacyUpgrade) {
+    Write-Step "STRONG PRIVACY UPGRADE (v$WG_KS_VERSION)"
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    Write-PrivacyHardeningGuardPs1
+    OK "privacy-hardening-guard.ps1 written"
+    $webrtcForwarder = @'
+# WebRTC forwarder (v'@ + $WG_KS_VERSION + @')
+$ErrorActionPreference = 'SilentlyContinue'
+$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path $main) { & $main }
+'@
+    $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
+    attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
+    Install-PrivacyHardening
+    if (Get-Command Invoke-V15StrongPrivacyStack -EA SilentlyContinue) {
+        Invoke-V15StrongPrivacyStack
+    } else { Write-Err 'v15 stack not loaded'; exit 1 }
+    Write-GuardBackups
+    Install-ScriptIntegrityVault
+    $upgWarn = 0
+    foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
+        if (Test-PrivacyChromiumPolicy $pair[0]) { OK "Browser privacy: $($pair[1])" }
+        else { WARN "Browser privacy: $($pair[1]) incomplete"; $upgWarn++ }
+    }
+    if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
+        if (Test-V14DnsLeakHealthy) { OK 'dnscrypt-proxy: healthy' }
+        else { WARN 'dnscrypt-proxy: not healthy'; $upgWarn++ }
+    }
+    if (Get-Command Test-V15DnsLockdownHealthy -EA SilentlyContinue) {
+        if (Test-V15DnsLockdownHealthy) { OK 'System DNS lock: all adapters 127.0.0.1' }
+        else { WARN 'System DNS lock: incomplete'; $upgWarn++ }
+    }
+    if (Get-Command Test-V15NetworkPrivacyHealthy -EA SilentlyContinue) {
+        if (Test-V15NetworkPrivacyHealthy) { OK 'Network privacy: LLMNR off' }
+        else { WARN 'Network privacy: LLMNR still enabled'; $upgWarn++ }
+    }
+    if (Test-ScriptIntegrityVault) { OK "Script integrity vault: verified" }
+    else { WARN "Script integrity vault: mismatch or missing"; $upgWarn++ }
+    try { Log "strong privacy upgrade v$WG_KS_VERSION completed" } catch {}
+    Write-Host ""
+    if ($upgWarn -eq 0) {
+        Write-Host "  STRONG PRIVACY UPGRADE COMPLETE (v$WG_KS_VERSION)" -ForegroundColor Green
+    } else {
+        Write-Host "  STRONG PRIVACY UPGRADE COMPLETE - $upgWarn warning(s)" -ForegroundColor Yellow
+    }
+    Write-Host "  Run: .\scripts\privacy-audit.ps1 then .\scripts\safe-live-verify.ps1" -ForegroundColor Gray
+    Write-Host "  Sensitive browsing: desktop Hassas-Tarama.lnk or sensitive-mode.ps1" -ForegroundColor Gray
     if (-not $NoPause) { pause }
     exit 0
 }
@@ -1298,7 +1372,7 @@ $allRules = @(
     "KS-Block-IPv6-Out","KS-Block-IPv6-In",
     "KS-LAN-Out","KS-LAN-In","KS-DHCP-Out","KS-DHCP-In",
     "KS-WARP-Server-Out","KS-Loopback-Out","KS-Loopback-In",
-    "KS-DNS-Allow","KS-DNS-Block","KS-DNS-Block-TCP","KS-WireGuard-EXE","KS-WireGuard-Tunnel-SVC",
+    "KS-DNS-Allow","KS-DNS-Block","KS-DNS-Block-TCP","KS-WireGuard-EXE","KS-Dnscrypt-EXE","KS-WireGuard-Tunnel-SVC",
     "KS - ENGEL Wi-Fi Cikis","KS - ENGEL Ethernet Cikis","KS - ENGEL IPv6 Cikis","KS - ENGEL IPv6 Giris",
     "KS - Yerel Ag Cikis","KS - Yerel Ag Giris","KS - DHCP Cikis","KS - DHCP Giris",
     "KS - WARP Sunucu Cikis","KS - Loopback Cikis","KS - Loopback Giris",
@@ -1367,6 +1441,9 @@ netsh advfirewall firewall add rule name="KS-DNS-Allow"     dir=out action=allow
 netsh advfirewall firewall add rule name="KS-DNS-Block"     dir=out action=block protocol=UDP remoteport=53 enable=no | Out-Null
 netsh advfirewall firewall add rule name="KS-DNS-Block-TCP" dir=out action=block protocol=TCP remoteport=53 enable=no | Out-Null
 netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes | Out-Null
+if (Test-Path $DNSCRYPT_EXE) {
+    netsh advfirewall firewall add rule name="KS-Dnscrypt-EXE" dir=out action=allow program="$DNSCRYPT_EXE" enable=yes | Out-Null
+}
 
 Write-Info "Server IPs: $serverIPs"
 netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIPs remoteport=$serverPort enable=yes | Out-Null
@@ -2078,6 +2155,7 @@ function Repair-EssentialFirewall {
     $alwaysOn = @(
         @{ N='KS-DNS-Allow';     A='netsh advfirewall firewall add rule name="KS-DNS-Allow" dir=out action=allow protocol=UDP remoteip=1.1.1.1,1.0.0.1 remoteport=53 enable=yes' },
         @{ N='KS-WireGuard-EXE'; A='netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes' },
+        @{ N='KS-Dnscrypt-EXE'; A='netsh advfirewall firewall add rule name="KS-Dnscrypt-EXE" dir=out action=allow program="C:\WireGuard\dnscrypt-proxy\dnscrypt-proxy.exe" enable=yes' },
         @{ N='KS-WARP-Server-Out'; A="netsh advfirewall firewall add rule name=`"KS-WARP-Server-Out`" dir=out action=allow protocol=UDP remoteip=$serverIp remoteport=$SERVER_PORT enable=yes" }
     )
     $existsOnly = @(
@@ -2259,6 +2337,10 @@ try {
     }
     $wgDns = 'C:\WireGuard\dnscrypt-guard.ps1'
     if (Test-Path $wgDns) { & $wgDns }
+    $wgDnsLock = 'C:\WireGuard\dns-lockdown-guard.ps1'
+    if (Test-Path $wgDnsLock) { & $wgDnsLock }
+    $wgNetPriv = 'C:\WireGuard\network-privacy-guard.ps1'
+    if (Test-Path $wgNetPriv) { & $wgNetPriv }
     $wgTor = 'C:\WireGuard\tor-hardening-guard.ps1'
     if (Test-Path $wgTor) { & $wgTor }
     $wgTorMon = 'C:\WireGuard\tor-connectivity-monitor.ps1'
@@ -2951,6 +3033,18 @@ if (Get-Command Write-AllV14GuardScripts -EA SilentlyContinue) {
 } else { WARN 'v14 stack missing - guard scripts skipped' }
 
 # ================================================================
+Write-Step "STEP 10e - V15 STRONG PRIVACY GUARD SCRIPTS"
+# ================================================================
+if (Get-Command Write-DnsLockdownGuardPs1 -EA SilentlyContinue) {
+    Write-DnsLockdownGuardPs1
+    Write-NetworkPrivacyGuardPs1
+    if (Get-Command Write-DnscryptGuardPs1V15 -EA SilentlyContinue) { Write-DnscryptGuardPs1V15 }
+    if (Get-Command Write-TorHardeningGuardPs1V15 -EA SilentlyContinue) { Write-TorHardeningGuardPs1V15 }
+    if (Get-Command Write-LeakSentinelPs1V15 -EA SilentlyContinue) { Write-LeakSentinelPs1V15 }
+    OK "v15 guard scripts written (dns-lockdown/network-privacy/leak-sentinel)"
+} else { WARN 'v15 stack missing - strong privacy guard scripts skipped' }
+
+# ================================================================
 Write-Step "STEP 11 - MAIN SCHEDULED TASK (60s boot delay)"
 # ================================================================
 Remove-TaskFully $TASK_MONITOR
@@ -3268,6 +3362,21 @@ if (Test-Path $LEAK_SENTINEL_PS1) {
 } else { WARN "leak-sentinel.ps1 missing" }
 
 # ================================================================
+Write-Step "STEP 18f - V15 STRONG PRIVACY STACK"
+# ================================================================
+if (Get-Command Invoke-V15StrongPrivacyStack -EA SilentlyContinue) {
+    Invoke-V15StrongPrivacyStack
+    if (Get-Command Test-V15DnsLockdownHealthy -EA SilentlyContinue) {
+        if (Test-V15DnsLockdownHealthy) { OK "System DNS lock: all adapters 127.0.0.1" }
+        else { WARN "System DNS lock: incomplete (guard will retry)" }
+    }
+    if (Get-Command Test-V15NetworkPrivacyHealthy -EA SilentlyContinue) {
+        if (Test-V15NetworkPrivacyHealthy) { OK "Network privacy: LLMNR disabled" }
+        else { WARN "Network privacy: LLMNR may still be on" }
+    }
+} else { WARN "v15 strong privacy stack skipped" }
+
+# ================================================================
 Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
 # ================================================================
 Ensure-TunnelForInstall | Out-Null
@@ -3398,6 +3507,14 @@ if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
     if (Test-V14DnsLeakHealthy) { OK 'dnscrypt-proxy: RUNNING + 127.0.0.1:53' }
     else { WARN "dnscrypt-proxy: not healthy"; $warnings++ }
 }
+if (Test-Path $DNS_LOCKDOWN_GUARD_PS1) { OK "dns-lockdown-guard.ps1: present" } else { WARN "dns-lockdown-guard.ps1: missing"; $warnings++ }
+if (Test-Path $NETWORK_PRIVACY_GUARD_PS1) { OK "network-privacy-guard.ps1: present" } else { WARN "network-privacy-guard.ps1: missing"; $warnings++ }
+$dnscryptFw = Get-NetFirewallRule -DisplayName "KS-Dnscrypt-EXE" -EA SilentlyContinue
+if ($dnscryptFw) { OK "KS-Dnscrypt-EXE firewall rule: ACTIVE" } else { WARN "KS-Dnscrypt-EXE firewall rule: missing"; $warnings++ }
+if (Get-Command Test-V15DnsLockdownHealthy -EA SilentlyContinue) {
+    if (Test-V15DnsLockdownHealthy) { OK "System DNS lock: healthy" }
+    else { WARN "System DNS lock: not confirmed"; $warnings++ }
+}
 $torSt = (Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name TorState -EA SilentlyContinue).TorState
 if ($torSt -eq 'NOT_INSTALLED') { WARN "Tor Browser: not installed (optional)" }
 elseif ($torSt) { OK "Tor state: $torSt" }
@@ -3436,6 +3553,9 @@ Write-Host "  [+] Privacy hardening: cookies/fingerprint/telemetry/ads" -Foregro
 Write-Host "  [+] dnscrypt-proxy: encrypted DNS via 127.0.0.1 (WG DNS)" -ForegroundColor DarkGray
 Write-Host "  [+] Tor hardening: user.js (start Tor Browser manually)" -ForegroundColor DarkGray
 Write-Host "  [+] leak-sentinel: read-only DNS leak probe (no firewall changes)" -ForegroundColor DarkGray
+Write-Host "  [+] v15 DNS lockdown: all adapters -> 127.0.0.1, DoH off" -ForegroundColor DarkGray
+Write-Host "  [+] v15 network privacy: LLMNR/NetBIOS disabled" -ForegroundColor DarkGray
+Write-Host "  [+] Sensitive mode: Hassas-Tarama.lnk (Tor Browser only)" -ForegroundColor DarkGray
 Write-Host "  Reboot log: C:\WireGuard\reboot-verify.log"         -ForegroundColor DarkGray
 Write-Host ""
 if ($CUSTOM_MODE) {

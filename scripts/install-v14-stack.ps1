@@ -276,7 +276,7 @@ else { Write-Crisis 'TOR_DOWN' 'SOCKS 9150 not listening'; Log 'Tor SOCKS down (
 
 function Write-LeakSentinelPs1 {
     $content = @"
-# leak-sentinel v$script:WG_KS_VERSION — read-only probes, never changes firewall
+# leak-sentinel v$script:WG_KS_VERSION - read-only probes, never changes firewall
 `$ErrorActionPreference = 'SilentlyContinue'
 `$LOG = 'C:\WireGuard\killswitch.log'
 `$REG = 'HKLM:\SOFTWARE\WGKillSwitch'

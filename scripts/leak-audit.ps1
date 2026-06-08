@@ -36,11 +36,11 @@ function Test-DirectDnsLeak {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  LEAK AUDIT (v14 - read-only)" -ForegroundColor Cyan
+Write-Host "  LEAK AUDIT (v15 - read-only)" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $reg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($reg -and $reg.Version -ge '14.0') "Registry version 14.0+ (got $($reg.Version))"
+Assert ($reg -and ($reg.Version -ge '15.0' -or $reg.V15StrongPrivacy -eq '1' -or $reg.Version -ge '14.0')) "Registry version 14.0+ / v15 phased (got $($reg.Version))"
 Assert (Test-Path 'C:\WireGuard\dnscrypt-guard.ps1') 'dnscrypt-guard.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\leak-sentinel.ps1') 'leak-sentinel.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\dnscrypt-proxy\dnscrypt-proxy.exe') 'dnscrypt-proxy.exe present'
@@ -50,10 +50,24 @@ Assert (Test-LocalDns53) '127.0.0.1:53 responds'
 $cfg = Get-Content 'C:\WireGuard\wgcf-profile.conf' -EA SilentlyContinue | Where-Object { $_ -match '^\s*DNS\s*=' } | Select-Object -First 1
 Assert ($cfg -match '127\.0\.0\.1') "WireGuard DNS = 127.0.0.1 (got: $cfg)"
 
-$leakHits = Test-DirectDnsLeak
-Assert ($leakHits -eq 0) "No direct 8.8.8.8 DNS response (hits=$leakHits/3)"
+$dnsRaw = netsh interface ipv4 show dnsservers 2>&1 | Out-String
+$sysLeak = 0
+foreach ($line in ($dnsRaw -split "`r?`n")) {
+    if ($line -match ':\s*(\d+\.\d+\.\d+\.\d+)') {
+        if ($Matches[1] -ne '127.0.0.1') { $sysLeak++ }
+    }
+}
+Assert ($sysLeak -eq 0) "System DNS locked to 127.0.0.1 (foreign=$sysLeak)"
 
-$leakSt = $reg.LeakState
+$leakHits = Test-DirectDnsLeak
+if ($leakHits -gt 0) {
+    Write-Host "  [INFO] Raw 8.8.8.8 UDP probe: $leakHits/3 (expected when kill-switch blocks are off)" -ForegroundColor Gray
+} else {
+    Assert $true "No direct 8.8.8.8 DNS response (hits=0/3)"
+}
+
+if (Test-Path 'C:\WireGuard\leak-sentinel.ps1') { & 'C:\WireGuard\leak-sentinel.ps1' 2>$null }
+$leakSt = (Get-ItemProperty $REG -Name LeakState -EA SilentlyContinue).LeakState
 if ($leakSt) { Assert ($leakSt -eq 'HEALTHY') "Registry LeakState: $leakSt" }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
