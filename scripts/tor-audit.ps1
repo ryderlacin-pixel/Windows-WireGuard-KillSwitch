@@ -13,13 +13,13 @@ function Assert([bool]$cond, [string]$name) {
 function Get-TorRoots {
     $roots = [System.Collections.Generic.List[string]]::new()
     foreach ($p in @(
-        "${env:ProgramFiles}\Tor Browser",
-        "${env:ProgramFiles(x86)}\Tor Browser",
-        "$env:LOCALAPPDATA\Tor Browser"
+        (Join-Path $env:ProgramFiles 'Tor Browser'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Tor Browser'),
+        (Join-Path $env:LOCALAPPDATA 'Tor Browser')
     )) {
         if ($p -and (Test-Path (Join-Path $p 'Browser\firefox.exe'))) { $roots.Add($p) }
     }
-    return $roots
+    return ,$roots
 }
 
 function Test-Socks9150 {
@@ -45,12 +45,12 @@ Assert (Test-Path 'C:\WireGuard\tor-connectivity-monitor.ps1') 'tor-connectivity
 
 $roots = Get-TorRoots
 if ($roots.Count -eq 0) {
-    Write-Host "  [WARN] Tor Browser not installed — optional for sensitive browsing" -ForegroundColor Yellow
+    Write-Host '  [WARN] Tor Browser not installed - optional for sensitive browsing' -ForegroundColor Yellow
     Write-Host "  Install from https://www.torproject.org/download/ then re-run -TorUpgradeOnly" -ForegroundColor Gray
     exit 0
 }
 
-Assert ($roots.Count -ge 1) "Tor Browser installed ($($roots[0]))"
+Assert ($roots.Count -ge 1) ('Tor Browser installed (' + $roots[0] + ')')
 
 $userJs = Join-Path $roots[0] 'Browser\TorBrowser\Data\Browser\user.js'
 Assert (Test-Path $userJs) 'Tor user.js present'
@@ -62,7 +62,7 @@ if (Test-Path $userJs) {
 
 $socks = Test-Socks9150
 if ($socks) { Assert $true 'Tor SOCKS 9150 listening (Tor Browser running)' }
-else { Write-Host "  [WARN] SOCKS 9150 not listening — start Tor Browser for sensitive use" -ForegroundColor Yellow }
+else { Write-Host '  [WARN] SOCKS 9150 not listening - start Tor Browser for sensitive use' -ForegroundColor Yellow }
 
 $torSt = $reg.TorState
 if ($torSt) { Write-Host "  [INFO] TorState: $torSt" -ForegroundColor Gray }

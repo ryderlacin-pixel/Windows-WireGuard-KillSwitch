@@ -4,15 +4,15 @@
 function Get-TorBrowserRoots {
     $roots = [System.Collections.Generic.List[string]]::new()
     foreach ($p in @(
-        "${env:ProgramFiles}\Tor Browser",
-        "${env:ProgramFiles(x86)}\Tor Browser",
-        "$env:LOCALAPPDATA\Tor Browser",
-        "$env:USERPROFILE\Desktop\Tor Browser",
-        "$env:USERPROFILE\Downloads\Tor Browser"
+        (Join-Path $env:ProgramFiles 'Tor Browser'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Tor Browser'),
+        (Join-Path $env:LOCALAPPDATA 'Tor Browser'),
+        (Join-Path $env:USERPROFILE 'Desktop\Tor Browser'),
+        (Join-Path $env:USERPROFILE 'Downloads\Tor Browser')
     )) {
         if ($p -and (Test-Path (Join-Path $p 'Browser\firefox.exe'))) { $roots.Add($p) }
     }
-    return $roots
+    return ,$roots
 }
 
 function Get-DnscryptManifest {
@@ -220,9 +220,9 @@ function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss
 $userJs
 '@
 `$roots = @(
-    "`${env:ProgramFiles}\Tor Browser",
-    "`${env:ProgramFiles(x86)}\Tor Browser",
-    "`$env:LOCALAPPDATA\Tor Browser"
+    (Join-Path `$env:ProgramFiles 'Tor Browser'),
+    (Join-Path `${env:ProgramFiles(x86)} 'Tor Browser'),
+    (Join-Path `$env:LOCALAPPDATA 'Tor Browser')
 )
 foreach (`$root in `$roots) {
     if (-not (Test-Path `$root)) { continue }
@@ -253,7 +253,7 @@ function Write-Crisis(`$state, `$detail) {
     Set-ItemProperty `$REG 'TorLastError' `$detail -Force -EA SilentlyContinue
 }
 `$torInstalled = `$false
-foreach (`$r in @("`${env:ProgramFiles}\Tor Browser", "`$env:LOCALAPPDATA\Tor Browser")) {
+foreach (`$r in @((Join-Path `$env:ProgramFiles 'Tor Browser'), (Join-Path `$env:LOCALAPPDATA 'Tor Browser'))) {
     if (Test-Path (Join-Path `$r 'Browser\firefox.exe')) { `$torInstalled = `$true; break }
 }
 if (-not `$torInstalled) {
@@ -317,7 +317,7 @@ function Write-AllV14GuardScripts {
 function Install-TorBrowserHint {
     $roots = Get-TorBrowserRoots
     if ($roots.Count -gt 0) {
-        OK "Tor Browser found: $($roots[0])"
+        OK ('Tor Browser found: ' + $roots[0])
         return $true
     }
     WARN 'Tor Browser not installed — install from https://www.torproject.org/download/ then re-run -TorUpgradeOnly'
