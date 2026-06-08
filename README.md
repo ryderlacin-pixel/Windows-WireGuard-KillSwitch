@@ -7,9 +7,11 @@
 ![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
 ![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
 
-> **One script. No config. No personal info. Full kill switch.**
+> **One script. Full kill switch. Strong privacy stack (v15).**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v15.0** is the current production release (strong privacy stack + kill switch — protection always stays installed).
+Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default:** free anonymous Cloudflare WARP. **Recommended for higher anonymity:** connect your own **paid, no-log WireGuard VPN** (Mullvad, ProtonVPN, IVPN, etc.) — same kill switch + privacy stack, better exit identity.
+
+**v15.0** is the current production release.
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
@@ -67,16 +69,83 @@ In that environment, the combination of **Cloudflare WARP + this kill switch** w
 | **State-level blocks** | WARP routes traffic through Cloudflare's network, bypassing most common ISP/DNS blocks for everyday browsing |
 | **VPN drops** | Kill switch blocks all outbound traffic immediately — no accidental leak onto a filtered or unprotected connection |
 | **Reboot / crash** | 9 recovery layers restart the tunnel automatically; `WG-RebootVerify` audits health ~5 min after boot |
-| **DNS leaks** | Firewall allows DNS only to `1.1.1.1` / `1.0.0.1`; all other DNS outbound is blocked |
+| **DNS leaks** | v15: all adapters → `127.0.0.1` (dnscrypt-proxy + Quad9), LLMNR/NetBIOS off; firewall DNS rules as backup |
 
 Validated on **Windows 11** with production use across multiple reboots (v10.0+). Not a lab test — real machine, real network, real blocks.
 
 **Caveats (honest):**
 - Effectiveness depends on the type of block (DNS, IP range, or deep packet inspection). WARP handles most ISP-level filtering; it is **not** a guarantee against every censorship technique.
 - WARP is Cloudflare's consumer VPN — throughput and latency vary by region.
-- Custom server mode (`-CustomConfig`) works the same way; point firewall rules at your own endpoint.
+- **Anonymity ceiling with WARP:** Cloudflare still terminates your tunnel. Good for blocks + leak protection; not maximum anonymity (see below).
 
 *Personal testing note — not legal advice. Users are responsible for complying with local laws.*
+
+---
+
+## Privacy & anonymity — WARP vs your own paid VPN
+
+This project separates **leak protection** (kill switch + DNS lock) from **who sees your traffic at the VPN layer**.
+
+### Three practical tiers
+
+| Tier | Setup | Leak / DNS / tracking (v15) | Anonymity (honest) | Best for |
+|------|--------|-------------------------------|--------------------|----------|
+| **A — Default** | `.\install.ps1` (WARP) | **Strong** (~8.5–9/10) | **Moderate** (~7.5–8/10) | Free, zero signup, bypass ISP blocks |
+| **B — Paid VPN** | `.\install.ps1 -CustomConfig your.conf` | **Strong** (same v15 stack) | **High** (~8.5–9.5/10) | Daily privacy; provider choice matters |
+| **C — Sensitive** | Tier A or B + Tor (`Hassas-Tarama.lnk`) | **Strong** + Tor isolation | **Higher for browsing** (~9/10 in Tor) | Investigations, accounts, whistleblowing |
+
+### Why a paid WireGuard VPN increases anonymity
+
+With **default WARP**, traffic enters Cloudflare’s consumer network. That is fine for censorship circumvention and leak safety, but **Cloudflare is always your VPN operator** — they see tunnel metadata and can correlate usage patterns at the edge.
+
+With a **quality paid, no-log WireGuard provider** you typically gain:
+
+| Benefit | What it means for you |
+|---------|------------------------|
+| **Independent operator** | Exit is not tied to Cloudflare’s consumer WARP product |
+| **No-log policy + audits** | Reputable providers (e.g. Mullvad, IVPN, ProtonVPN WireGuard) minimize retained metadata |
+| **Shared IP pools** | Many users behind the same endpoint IP — harder to single you out |
+| **Jurisdiction choice** | Pick a provider and server country aligned with your threat model |
+| **Fixed WireGuard config** | You control which server you land on; kill switch still blocks if tunnel drops |
+
+**v15 privacy stack applies in both modes:** system DNS lock, dnscrypt (Quad9, `require_nolog`), browser policies, LLMNR/NetBIOS off, optional Tor for sensitive sessions. You are not “starting over” — you are **replacing the tunnel endpoint** while keeping the same hardening.
+
+### Recommended path: paid VPN + this kill switch
+
+1. Subscribe to a **paid WireGuard-capable VPN** with a clear no-log policy and public audit (avoid free VPNs for anonymity — they often monetize traffic).
+2. Download the provider’s **WireGuard `.conf`** (one file per server/location).
+3. Install with custom mode (Administrator PowerShell):
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1 -CustomConfig "C:\path\to\mullvad-wireguard.conf" -NoPause
+```
+
+4. Apply v15 privacy if upgrading from an older install:
+
+```powershell
+.\install.ps1 -StrongPrivacyUpgrade -NoPause
+```
+
+5. Verify:
+
+```powershell
+.\scripts\privacy-audit.ps1    # expect STRONG
+.\scripts\safe-live-verify.ps1 # 77/77
+```
+
+6. For high-risk browsing only: desktop **Hassas-Tarama** shortcut (Tor Browser) — not for everyday sites.
+
+### What paid VPN does *not* magically fix
+
+- Your **ISP** still sees an encrypted tunnel (metadata: “VPN in use”) — use bridge/obfuscation only if your provider offers it.
+- **Browser fingerprinting** and **logged-in accounts** can deanonymize you regardless of VPN.
+- **Tor over any VPN** still has operator-specific threat models; use Tor only when you need it.
+- We do **not** endorse or affiliate with any provider — choose based on audits, jurisdiction, and WireGuard support.
+
+### Switching from WARP to a paid VPN
+
+Re-run install with `-CustomConfig`. The script replaces the tunnel service, firewall server allow rules, and monitor/repair scripts for your endpoint. WARP-specific files (`wgcf.exe`) are skipped in custom mode.
 
 ---
 
@@ -104,9 +173,11 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 That's it. No manual WireGuard setup. No account creation. Fully automated.
 
-### Custom WireGuard server
+### Custom WireGuard server (paid VPN — higher anonymity)
 
-Use your own `.conf` file instead of WARP. WireGuard is still installed automatically; only wgcf/WARP generation is skipped.
+Use your own `.conf` from a **paid, no-log WireGuard VPN** instead of WARP. WireGuard is still installed automatically; wgcf/WARP generation is skipped. **All v15 privacy and kill-switch layers are identical** — only the VPN operator and exit IP change.
+
+Pick providers that publish WireGuard configs, no-log policies, and third-party audits. Export one `.conf` per server you want to use.
 
 **Minimum** — endpoint and port are read from the config file:
 
@@ -235,9 +306,21 @@ Get-Content C:\WireGuard\killswitch.log -Wait -Tail 30
 
 ## Privacy
 
-- No account is created. The `wgcf register` command generates a random device identity on Cloudflare's WARP network.
-- No email, name, or identifying information is collected or stored.
-- The generated `wgcf-profile.conf` contains only a private key and Cloudflare's WARP endpoint — nothing personal.
+**WARP (default mode)**
+
+- No account is created. `wgcf register` generates a random device identity on Cloudflare's WARP network.
+- No email, name, or identifying information is stored by this installer.
+- `wgcf-profile.conf` contains only a private key and Cloudflare's WARP endpoint.
+
+**Paid custom VPN mode**
+
+- You bring your own provider account and `.conf`; this project does not store credentials beyond what is in your WireGuard config file on disk (`C:\WireGuard\`).
+- Anonymity improves because **you choose a no-log operator** instead of routing through Cloudflare WARP — see [Privacy & anonymity](#privacy--anonymity--warp-vs-your-own-paid-vpn).
+
+**v15 stack (both modes)**
+
+- System DNS lock, dnscrypt-proxy (Quad9), browser/telemetry hardening, leak-sentinel, optional Tor sensitive mode.
+- Run `.\scripts\privacy-audit.ps1` — target tier **STRONG**.
 
 ---
 
@@ -272,6 +355,7 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ### v15.0 (production — current)
 - **Strong privacy:** system DNS lock (all adapters `127.0.0.1`), LLMNR/NetBIOS off, quad9-only dnscrypt (`require_nolog`)
 - `KS-Dnscrypt-EXE` firewall rule, `sensitive-mode.ps1` + **Hassas-Tarama.lnk** (Tor sensitive browsing)
+- **Docs:** paid WireGuard VPN + `-CustomConfig` for higher anonymity vs default WARP
 - Upgrade: `.\install.ps1 -StrongPrivacyUpgrade -NoPause` · Recovery: `.\scripts\restore-full-stack.ps1`
 - Gates: `privacy-audit.ps1` (STRONG), `leak-audit.ps1`, `safe-live-verify.ps1` (77 checks)
 - See **[docs/releases/v15.0.md](docs/releases/v15.0.md)**
