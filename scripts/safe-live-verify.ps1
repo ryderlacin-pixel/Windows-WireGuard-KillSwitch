@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v12.0 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v12.1 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -36,7 +36,14 @@ function Test-Internet {
     return ($hits -ge 2)
 }
 
-function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
+function Test-Dns {
+    try {
+        $r = [System.Net.Dns]::GetHostAddresses('google.com')
+        return ($r -and $r.Count -gt 0)
+    } catch { return $false }
+}
+
+function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) -and (Test-Dns) }
 
 function Get-MonitorCount {
     $n = 0
@@ -52,7 +59,7 @@ function Get-MonitorCount {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  SAFE LIVE VERIFY (v12.0 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  SAFE LIVE VERIFY (v12.1 - non-disruptive)" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 # [1] Health baseline — abort destructive checks if unhealthy but still run script audits
@@ -64,7 +71,7 @@ if (-not $healthy) {
 
 # [2] Registry
 $reg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($reg -and $reg.Version -ge '12.0') "Registry version 12.0+ (got $($reg.Version))"
+Assert ($reg -and $reg.Version -ge '12.1') "Registry version 12.1+ (got $($reg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat deployed'
@@ -78,11 +85,14 @@ $svc = Get-Content 'C:\WireGuard\service-monitor.ps1' -Raw -EA SilentlyContinue
 $wmi = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v12\.0') 'monitor.ps1 version v12.0'
+Assert ($mon -match 'v12\.1') 'monitor.ps1 version v12.1'
+Assert ($mon -match 'Disable-DnsLeakProtection') 'monitor toggles DNS leak with block state'
+Assert ($mon -match 'Test-Dns') 'monitor includes DNS health check'
 Assert ($mon -match 'oldCmd -match') 'monitor PID validated by command-line'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
 Assert ($mon -match 'DNS flush') 'monitor zombie uses DNS flush not reinstall'
-Assert ($rep -match 'v12\.0|Repair Script v12') 'repair.ps1 version v12.0'
+Assert ($rep -match 'v12\.1|Repair Script v12') 'repair.ps1 version v12.1'
+Assert ($rep -match 'Disable-DnsLeakProtection') 'repair toggles DNS leak with block state'
 Assert ($rep -match 'deferring reinstall') 'repair defers to active monitor'
 Assert ($rep -match 'Try-ReinstallTunnel') 'repair has mutex reinstall'
 Assert ($rep -match 'oldCmd -match|CommandLine') 'repair validates monitor PID'
@@ -99,7 +109,11 @@ if ($wmiFilter) {
 }
 
 # [5] Layers (read-only)
-foreach ($tn in @('WG-KillSwitch', 'WG-RepairTask', 'WG-RebootVerify')) {
+Assert (Test-Path 'C:\WireGuard\internet-watchdog.ps1') 'internet-watchdog.ps1 deployed'
+$wd = Get-Content 'C:\WireGuard\internet-watchdog.ps1' -Raw -EA SilentlyContinue
+Assert ($wd -match 'v12\.1|Internet Watchdog') 'internet-watchdog.ps1 version v12.1'
+
+foreach ($tn in @('WG-KillSwitch', 'WG-RepairTask', 'WG-RebootVerify', 'WG-InternetWatchdog')) {
     $t = Get-ScheduledTask -TaskName $tn -EA SilentlyContinue
     Assert ($t -and $t.State -in @('Ready', 'Running')) "Task $tn active"
 }
@@ -114,9 +128,11 @@ Assert ((Get-MonitorCount) -le 1) 'Single monitor instance'
 
 # [6] Firewall when healthy
 if ($healthy) {
-    foreach ($r in @('KS-WARP-Server-Out', 'KS-DNS-Block', 'KS-DNS-Block-TCP')) {
+    $o = netsh advfirewall firewall show rule name='KS-WARP-Server-Out' 2>&1 | Out-String
+    Assert ($o -match 'Enabled:\s+Yes') 'Firewall enabled: KS-WARP-Server-Out'
+    foreach ($r in @('KS-DNS-Block', 'KS-DNS-Block-TCP')) {
         $o = netsh advfirewall firewall show rule name=$r 2>&1 | Out-String
-        Assert ($o -match 'Enabled:\s+Yes') "Firewall enabled: $r"
+        Assert ($o -match 'Enabled:\s+No') "DNS leak OFF when healthy: $r"
     }
     foreach ($r in @('KS-Block-WiFi-Out', 'KS-Block-Ethernet-Out')) {
         $o = netsh advfirewall firewall show rule name=$r 2>&1 | Out-String
@@ -148,7 +164,8 @@ try { $mA.ReleaseMutex() } catch {}
 $mA.Dispose()
 
 # [9] Re-verify internet unchanged
-Assert (Test-Internet) 'Post-check: internet still working'
+Assert (Test-Internet) 'Post-check: TCP internet still working'
+Assert (Test-Dns) 'Post-check: DNS still working'
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  SAFE LIVE: $pass checks, $($failures.Count) failures" -ForegroundColor $(if ($failures.Count -eq 0) { 'Green' } else { 'Red' })
