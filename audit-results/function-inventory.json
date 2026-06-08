@@ -193,6 +193,7 @@
     "scripts/run-all-tests.ps1":  {
 
                                   },
+    "lib/Install-DryRunPreview.ps1":  "Invoke-InstallDryRunPreview",
     "scripts/install-v15-privacy-stack.ps1":  [
                                                   "Get-DnscryptTomlContentV15",
                                                   "Get-TorUserJsContentV15",
@@ -296,6 +297,8 @@
                                         "Set-BootGraceRegistry",
                                         "Set-PostInstallGraceRegistry",
                                         "Set-KillSwitchArmedRegistry",
+                                        "Invoke-PreFlightInternetGuard",
+                                        "Write-PreFlightLog",
                                         "Get-WgSafetyRuntimeScript",
                                         "Invoke-DeployWgSafetyModule"
                                     ],

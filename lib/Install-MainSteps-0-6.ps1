@@ -2,6 +2,9 @@
 #Requires -Version 5.1
 
 function Invoke-InstallMainSteps0to6 {
+if ($script:InstallDryRun) {
+    throw 'FATAL: MainSteps 0-6 must never run in DryRun - use Invoke-InstallDryRunPreview'
+}
 # ================================================================
 Write-Step "STEP 0 - WIREGUARD + WARP AUTOMATIC INSTALL"
 # ================================================================

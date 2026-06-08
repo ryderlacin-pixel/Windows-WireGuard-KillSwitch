@@ -1,8 +1,8 @@
-﻿# Final Audit Summary - v15.3.0
+﻿# Final Audit Summary - v15.3.1
 
-Date: 2026-06-08 14:58:33
-Files audited: 97
-PASS: 97 | WARN files: 0 | FAIL: 0
+Date: 2026-06-08 15:03:36
+Files audited: 99
+PASS: 99 | WARN files: 0 | FAIL: 0
 ERROR findings: 0 | WARN findings: 0
 
 ## Per-file status
@@ -17,7 +17,7 @@ ERROR findings: 0 | WARN findings: 0
 | .github/workflows/live-smoke.yml | P1 | 35 | PASS | 0 | 0 |
 | .gitignore | P2 | 30 | PASS | 0 | 0 |
 | CONTRIBUTING.md | P2 | 53 | PASS | 0 | 0 |
-| docs/CODE_REVIEW.md | P3 | 253 | PASS | 0 | 0 |
+| docs/CODE_REVIEW.md | P3 | 275 | PASS | 0 | 0 |
 | docs/GITHUB_TOKEN.md | P3 | 65 | PASS | 0 | 0 |
 | docs/LAUNCH_CHECKLIST.md | P3 | 98 | PASS | 0 | 0 |
 | docs/PROMOTION.md | P3 | 102 | PASS | 0 | 0 |
@@ -51,28 +51,30 @@ ERROR findings: 0 | WARN findings: 0
 | docs/releases/v15.2.9.md | P3 | 56 | PASS | 0 | 0 |
 | docs/releases/v15.2.md | P4 | 139 | PASS | 0 | 0 |
 | docs/releases/v15.3.0.md | P4 | 29 | PASS | 0 | 0 |
+| docs/releases/v15.3.1.md | P4 | 34 | PASS | 0 | 0 |
 | emergency-reset.bat | P0 | 29 | PASS | 0 | 0 |
-| install.ps1 | P0 | 109 | PASS | 0 | 0 |
+| install.ps1 | P0 | 120 | PASS | 0 | 0 |
 | lib/Install-Constants.ps1 | P0 | 70 | PASS | 0 | 0 |
+| lib/Install-DryRunPreview.ps1 | P0 | 61 | PASS | 0 | 0 |
 | lib/Install-GeneratedScripts.ps1 | P0 | 1659 | PASS | 0 | 0 |
 | lib/Install-Helpers.ps1 | P0 | 586 | PASS | 0 | 0 |
-| lib/Install-MainSteps-0-6.ps1 | P0 | 319 | PASS | 0 | 0 |
+| lib/Install-MainSteps-0-6.ps1 | P0 | 322 | PASS | 0 | 0 |
 | lib/Install-MainSteps-18-20.ps1 | P0 | 322 | PASS | 0 | 0 |
 | lib/Install-Privacy.ps1 | P0 | 500 | PASS | 0 | 0 |
-| lib/Install-SafeNetwork.ps1 | P0 | 503 | PASS | 0 | 0 |
+| lib/Install-SafeNetwork.ps1 | P0 | 550 | PASS | 0 | 0 |
 | lib/Install-TasksAndWmi.ps1 | P0 | 269 | PASS | 0 | 0 |
 | lib/Install-UpgradePaths.ps1 | P0 | 196 | PASS | 0 | 0 |
 | LICENSE | P2 | 21 | PASS | 0 | 0 |
 | manifests/dnscrypt-v2.1.7.json | P0 | 6 | PASS | 0 | 0 |
-| README.md | P2 | 534 | PASS | 0 | 0 |
+| README.md | P2 | 545 | PASS | 0 | 0 |
 | scripts/behavior-sim-test.ps1 | P0-test | 413 | PASS | 0 | 0 |
 | scripts/ci.ps1 | P0-test | 106 | PASS | 0 | 0 |
 | scripts/emergency-reset.ps1 | P0 | 85 | PASS | 0 | 0 |
 | scripts/enable-dns-lockdown.ps1 | P0 | 38 | PASS | 0 | 0 |
 | scripts/ensure-tor-sensitive.ps1 | P0 | 67 | PASS | 0 | 0 |
 | scripts/fetch-nssm.ps1 | P0 | 34 | PASS | 0 | 0 |
-| scripts/file-coverage-test.ps1 | P0-test | 241 | PASS | 0 | 0 |
-| scripts/final-line-audit.ps1 | P0-test | 340 | PASS | 0 | 0 |
+| scripts/file-coverage-test.ps1 | P0-test | 247 | PASS | 0 | 0 |
+| scripts/final-line-audit.ps1 | P0-test | 346 | PASS | 0 | 0 |
 | scripts/github-visibility.ps1 | P5 | 103 | PASS | 0 | 0 |
 | scripts/install-tor-browser.ps1 | P0 | 61 | PASS | 0 | 0 |
 | scripts/install-v14-stack.ps1 | P0 | 460 | PASS | 0 | 0 |
@@ -84,9 +86,9 @@ ERROR findings: 0 | WARN findings: 0
 | scripts/patch-gpo-v13.5.ps1 | P0 | 10 | PASS | 0 | 0 |
 | scripts/post-install-verify.ps1 | P0 | 178 | PASS | 0 | 0 |
 | scripts/post-reboot-verify.ps1 | P0 | 114 | PASS | 0 | 0 |
-| scripts/pre-push-gate.ps1 | P0-test | 92 | PASS | 0 | 0 |
+| scripts/pre-push-gate.ps1 | P0-test | 95 | PASS | 0 | 0 |
 | scripts/privacy-audit.ps1 | P0 | 93 | PASS | 0 | 0 |
-| scripts/publish-releases.ps1 | P0 | 148 | PASS | 0 | 0 |
+| scripts/publish-releases.ps1 | P0 | 149 | PASS | 0 | 0 |
 | scripts/push-v15.2.ps1 | P0 | 58 | PASS | 0 | 0 |
 | scripts/race-recovery-test.ps1 | P0 | 170 | PASS | 0 | 0 |
 | scripts/reboot-sim-test.ps1 | P0-test | 495 | PASS | 0 | 0 |
@@ -100,8 +102,8 @@ ERROR findings: 0 | WARN findings: 0
 | scripts/security-audit.ps1 | P0 | 352 | PASS | 0 | 0 |
 | scripts/sensitive-mode.ps1 | P0 | 36 | PASS | 0 | 0 |
 | scripts/system-audit.ps1 | P0 | 59 | PASS | 0 | 0 |
-| scripts/Test-Helpers.ps1 | P0-test | 352 | PASS | 0 | 0 |
-| scripts/test-suite.ps1 | P0-test | 320 | PASS | 0 | 0 |
+| scripts/Test-Helpers.ps1 | P0-test | 355 | PASS | 0 | 0 |
+| scripts/test-suite.ps1 | P0-test | 331 | PASS | 0 | 0 |
 | scripts/tor-audit.ps1 | P0 | 79 | PASS | 0 | 0 |
 | scripts/tor-preflight.ps1 | P0 | 40 | PASS | 0 | 0 |
 | scripts/tor-rollback-v13.5.ps1 | P0 | 44 | PASS | 0 | 0 |

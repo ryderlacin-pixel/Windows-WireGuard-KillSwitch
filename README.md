@@ -11,17 +11,17 @@
 
 Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1+).
 
-**v15.3.0** is the current production release (internet-safe install — see [release notes](docs/releases/v15.3.0.md)).
+**v15.3.1** is the current production release (AI-safe DryRun + internet-safe install — see [release notes](docs/releases/v15.3.1.md)).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.3.0](docs/releases/v15.3.0.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.3.1](docs/releases/v15.3.1.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
 
 **Internet stuck?** Run **`emergency-reset.bat`** as Administrator (repo root or `C:\WireGuard\`) — removes `KS-*` rules, resets firewall/IP stack, re-enables physical adapters. Then wait 1–5 minutes for `WG-InternetWatchdog`, or re-run `install.ps1`.
 
-**First install on a real PC?** Test in a **VM** first: `.\install.ps1 -DryRun` (no firewall/NIC/registry-lock changes), then full VM install + reboot before physical hardware.
+**First install on a real PC?** Test in a **VM** first: `.\install.ps1 -DryRun` (pre-flight quiesce restores internet, then **read-only preview** — install steps 0–20 do not run), then full VM install + reboot before physical hardware.
 
 **CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse `install.ps1` + `lib/*.ps1` + scripts, **1008+ offline assertions** (x3 in `run-all-tests.ps1`), per-file coverage + final line audit 0 ERROR/WARN (no WireGuard/admin required).
 
@@ -70,8 +70,9 @@ flowchart TB
 |------|---------|
 | [`install.ps1`](install.ps1) | Entry point: dot-sources `lib/`, `-DryRun`, `-EnableFailsafe` |
 | [`emergency-reset.bat`](emergency-reset.bat) | One-click admin recovery if network is locked |
-| [`lib/Install-Constants.ps1`](lib/Install-Constants.ps1) | Paths, service names, version `15.2` |
-| [`lib/Install-SafeNetwork.ps1`](lib/Install-SafeNetwork.ps1) | Boot-safe window, DHCP/gateway exemptions, NIC whitelist, fail-open |
+| [`lib/Install-Constants.ps1`](lib/Install-Constants.ps1) | Paths, service names, version `15.3.1` |
+| [`lib/Install-DryRunPreview.ps1`](lib/Install-DryRunPreview.ps1) | AI-safe read-only `-DryRun` preview |
+| [`lib/Install-SafeNetwork.ps1`](lib/Install-SafeNetwork.ps1) | Pre-flight quiesce, boot-safe window, DHCP/gateway exemptions, fail-open |
 | [`lib/Install-Helpers.ps1`](lib/Install-Helpers.ps1) | Logging, mutex, Test-Internet, tunnel/WMI helpers |
 | [`lib/Install-Privacy.ps1`](lib/Install-Privacy.ps1) | Browser/telemetry policies, integrity vault |
 | [`lib/Install-UpgradePaths.ps1`](lib/Install-UpgradePaths.ps1) | `-StrongPrivacyUpgrade` and phased upgrades |
@@ -169,13 +170,13 @@ This project separates **leak protection** (always-on with `.\install.ps1`) from
 #    OR open an elevated PowerShell and run:
 
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1 -DryRun   # optional: simulate network hardening first (no firewall/NIC/registry lock)
+.\install.ps1 -DryRun   # optional: pre-flight quiesce + read-only preview (steps 0-20 skipped)
 .\install.ps1
 ```
 
 | Switch | Description |
 |--------|-------------|
-| `-DryRun` | **Zero-side-effect preview:** steps 0-6 log firewall/registry/adapter actions without applying them; **steps 7-20 are skipped** (no monitor, tasks, WMI, GPO, or guard scripts). Safe to run on your main PC for a read-only install preview. |
+| `-DryRun` | **AI-safe read-only preview:** `Invoke-PreFlightInternetGuard` restores internet first; then `Invoke-InstallDryRunPreview` lists steps and system status. **Steps 0-20 never execute** (no downloads, firewall mutations from install, monitor, tasks, WMI, or guards). Safe on your main PC while Cursor/AI is connected. |
 | `-EnableFailsafe` | Default `$true` — on install fatal error, fail-open instead of bricking |
 | `-NoPause` | Skip `pause` at end (automation/CI) |
 
@@ -370,7 +371,17 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v15.2.9 (production — current)
+### v15.3.1 (production — current)
+- **AI Connection Invariant** — `-DryRun` no longer runs install steps 0–6; pre-flight quiesce restores internet first
+- **`Invoke-InstallDryRunPreview`** — read-only step list + system status; zero downloads or install mutations
+- See **[docs/releases/v15.3.1.md](docs/releases/v15.3.1.md)**
+
+### v15.3.0
+- **KillSwitchArmed gate** — catch-all blocks only after tunnel+internet stable at STEP 19
+- **DNS lock manual-only** — `scripts/enable-dns-lockdown.ps1`; removed from auto install/repair chain
+- See **[docs/releases/v15.3.0.md](docs/releases/v15.3.0.md)**
+
+### v15.2.9
 - **Final line audit** — every repo file dot-by-dot; `scripts/final-line-audit.ps1` gate (0 ERROR, 0 WARN)
 - **1008+ offline assertions** — behavior-sim (216) + reboot-sim (510) + file-coverage (682) + suite gates
 - See **[docs/releases/v15.2.9.md](docs/releases/v15.2.9.md)**

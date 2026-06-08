@@ -2,9 +2,28 @@
 
 **Audience:** developers reviewing `install.ps1` before trusting it on their machine.
 
-**Current release:** [v15.2.9](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.2.9)
+**Current release:** [v15.3.1](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.3.1)
 
-This document answers reviewer questions from v10.2-v10.4 and summarizes v11-v15 production changes. **v15.2.9** is current production (final line audit gate, 1008+ offline assertions, 0 ERROR/WARN). **v15.2** added boot-safety in [`lib/Install-SafeNetwork.ps1`](../lib/Install-SafeNetwork.ps1) after a confirmed v15.1 reboot deadlock on real hardware. [`install.ps1`](../install.ps1) remains the single entry point.
+This document answers reviewer questions from v10.2-v10.4 and summarizes v11-v15 production changes. **v15.3.1** is current production (AI-safe DryRun, pre-flight quiesce, 1030+ offline assertions, 0 ERROR/WARN). **v15.2** added boot-safety in [`lib/Install-SafeNetwork.ps1`](../lib/Install-SafeNetwork.ps1) after a confirmed v15.1 reboot deadlock on real hardware. [`install.ps1`](../install.ps1) remains the single entry point.
+
+---
+
+## AI Connection Invariant (v15.3.1 — NEVER violate)
+
+**If install or `-DryRun` kills internet, the user's Cursor/AI session dies too.**
+
+| Rule | Implementation |
+|------|----------------|
+| Pre-flight first | `Invoke-PreFlightInternetGuard` runs before any install logic (including `-DryRun`) |
+| DryRun = preview only | `Invoke-InstallDryRunPreview` — steps 0–20 never execute |
+| Hard guard | `Invoke-InstallMainSteps0to6` throws if `$script:InstallDryRun` is set |
+
+Pre-flight quiesce **does** mutate firewall/registry to restore internet (tasks stopped, blocks removed, `KillSwitchArmed=0`). That is intentional — it protects the AI session before preview or install proceeds.
+
+```powershell
+.\install.ps1 -DryRun    # pre-flight quiesce + read-only preview (safe on main PC)
+.\install.ps1            # pre-flight quiesce + full install (VM first)
+```
 
 ---
 
@@ -13,12 +32,12 @@ This document answers reviewer questions from v10.2-v10.4 and summarizes v11-v15
 1. Read the **DESIGN PHILOSOPHY** block at the top of [`install.ps1`](../install.ps1).
 2. Skim **lib module map** below, then recovery layers in [README.md](../README.md#architecture).
 3. Compare concerns against the **Review response table** (v10) and **Version history** (v11–v15).
-4. Offline gate: `.\scripts\test-suite.ps1` (1008+ assertions), `.\scripts\final-line-audit.ps1` (95 files, 0 ERROR/WARN), `.\scripts\pre-push-gate.ps1`. Live (optional): `.\scripts\live-smoke-test.ps1`.
-5. **VM first:** `.\install.ps1 -DryRun` (no firewall/NIC/registry-lock changes), then full VM install + reboot before physical hardware.
+4. Offline gate: `.\scripts\test-suite.ps1` (1030+ assertions), `.\scripts\final-line-audit.ps1` (98 files, 0 ERROR/WARN), `.\scripts\pre-push-gate.ps1`. Live (optional): `.\scripts\live-smoke-test.ps1`.
+5. **VM first:** `.\install.ps1 -DryRun` (pre-flight quiesce restores internet, then read-only preview — install steps 0–20 do not run), then full VM install + reboot before physical hardware.
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1 -DryRun    # network-hardening simulation only
+.\install.ps1 -DryRun    # pre-flight quiesce + read-only preview (AI-safe)
 .\install.ps1              # real install (VM first)
 ```
 
@@ -225,12 +244,14 @@ All reports must be in **English**.
 | v15.1 | `lib/` modular split, WARP-first docs, one-step Hassas-Tarama, optional CI live-smoke |
 | v15.2 | Boot-safe 90s window, `Install-SafeNetwork.ps1`, emergency-reset.bat |
 | v15.2.9 | Final line audit (dot-by-dot), file-coverage gate, behavior/reboot sims, 1008+ assertion suite |
+| v15.3.0 | KillSwitchArmed gate, DNS lock manual-only, DryRun skipped steps 7–20 |
+| v15.3.1 | **AI Connection Invariant:** pre-flight quiesce + DryRun preview-only (steps 0–20 never run) |
 
 See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases) for full notes per version.
 
 ---
 
-## lib/ module map (v15.2.9)
+## lib/ module map (v15.3.1)
 
 | Module | Role |
 |--------|------|
@@ -238,8 +259,9 @@ See [Releases](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/
 | `Install-Helpers.ps1` | Logging, mutex, Test-Internet, tunnel/WMI/task helpers |
 | `Install-Privacy.ps1` | Browser policies, telemetry reduction, guard vault |
 | `Install-UpgradePaths.ps1` | `-StrongPrivacyUpgrade` and phased upgrade early-exit |
-| `Install-MainSteps-0-6.ps1` | WireGuard, firewall, tunnel (STEP 0-6) |
-| `Install-SafeNetwork.ps1` | Boot-safe window, `Invoke-SafeNetsh`, wg-safety.ps1, fail-open |
+| `Install-DryRunPreview.ps1` | Read-only `-DryRun` preview (`Invoke-InstallDryRunPreview`) |
+| `Install-MainSteps-0-6.ps1` | WireGuard, firewall, tunnel (STEP 0-6); throws in DryRun |
+| `Install-SafeNetwork.ps1` | Boot-safe window, `Invoke-PreFlightInternetGuard`, `Invoke-SafeNetsh`, wg-safety.ps1, fail-open |
 | `Install-GeneratedScripts.ps1` | monitor/repair/watchdog/anti-tamper heredocs |
 | `Install-TasksAndWmi.ps1` | Scheduled tasks, NSSM, WMI, GPO boot script |
 | `Install-MainSteps-18-20.ps1` | Privacy stacks, activation, final checks |

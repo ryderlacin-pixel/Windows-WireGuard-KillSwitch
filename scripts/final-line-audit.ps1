@@ -14,8 +14,8 @@ $functionInventory = @{}
 $errors = 0
 $warns = 0
 $passed = 0
-$CURRENT_VER = '15.3.0'
-$CURRENT_ASSERTIONS = '1013'
+$CURRENT_VER = '15.3.1'
+$CURRENT_ASSERTIONS = '1045'
 
 function Get-RuleStringList {
     param($Rule, [string]$Key)
@@ -49,7 +49,7 @@ function Add-Finding {
 
 function Test-CurrentDocClaims {
     param([string]$RelPath, [string]$Content, [string[]]$Lines)
-    if ($RelPath -notin @('README.md', 'docs/releases/v15.3.0.md', 'CONTRIBUTING.md', 'docs/PROMOTION.md', 'docs/LAUNCH_CHECKLIST.md', 'docs/CODE_REVIEW.md', 'docs/GITHUB_TOKEN.md')) { return }
+    if ($RelPath -notin @('README.md', 'docs/releases/v15.3.1.md', 'docs/releases/v15.3.0.md', 'CONTRIBUTING.md', 'docs/PROMOTION.md', 'docs/LAUNCH_CHECKLIST.md', 'docs/CODE_REVIEW.md', 'docs/GITHUB_TOKEN.md')) { return }
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         $ln = $Lines[$i]
         $n = $i + 1
@@ -64,7 +64,10 @@ function Test-CurrentDocClaims {
                 Add-Finding $RelPath $n 'ERROR' 'stale_assertion_count' "README says 164+ assertions (current: $CURRENT_ASSERTIONS+)"
             }
             if ($ln -match 'version 15\.2' -and $ln -notmatch '15\.2\.9') {
-                Add-Finding $RelPath $n 'WARN' 'stale_constants_ref' 'README references lib version 15.2 not 15.3.0'
+                Add-Finding $RelPath $n 'WARN' 'stale_constants_ref' "README references lib version 15.2 not $CURRENT_VER"
+            }
+            if ($ln -match 'v15\.3\.0.*current production release' -and $ln -notmatch '15\.3\.1') {
+                Add-Finding $RelPath $n 'ERROR' 'stale_readme_version' "README claims v15.3.0 as current (current: $CURRENT_VER)"
             }
         }
         if ($RelPath -eq 'docs/releases/v15.3.0.md' -and $ln -match '\b915\b' -and $ln -notmatch 'was|previously|old') {
@@ -81,7 +84,7 @@ function Test-CurrentDocClaims {
                 Add-Finding $RelPath $n 'ERROR' 'stale_release_ref' "Doc references old release as current (current: $CURRENT_VER)"
             }
         }
-        if ($RelPath -eq 'docs/CODE_REVIEW.md' -and $ln -match 'Current release' -and $ln -notmatch '15\.2\.9') {
+        if ($RelPath -eq 'docs/CODE_REVIEW.md' -and $ln -match 'Current release' -and $ln -notmatch [regex]::Escape($CURRENT_VER)) {
             Add-Finding $RelPath $n 'ERROR' 'stale_code_review_release' "CODE_REVIEW current release not $CURRENT_VER"
         }
         if ($RelPath -eq 'docs/GITHUB_TOKEN.md' -and $ln -match 'v15\.1' -and $ln -notmatch 'v15\.1\+') {
@@ -231,11 +234,11 @@ foreach ($entry in $manifest) {
         '\.json$' { Test-JsonFile $rel $content }
         '\.yml$' { Test-YmlFile $rel $content }
         '\.md$' {
-            if ($rel -eq 'README.md' -and $content -notmatch '15\.2\.9') {
-                Add-Finding $rel 0 'WARN' 'readme_version' 'README does not mention 15.3.0 prominently'
+            if ($rel -eq 'README.md' -and $content -notmatch '15\.3\.1') {
+                Add-Finding $rel 0 'WARN' 'readme_version' "README does not mention $CURRENT_VER prominently"
             }
-            if ($rel -match 'docs/releases/v15\.2\.9' -and $content -notmatch '1008') {
-                Add-Finding $rel 0 'WARN' 'release_test_count' 'v15.3.0.md should document 1013 assertion gate'
+            if ($rel -eq "docs/releases/v15.3.1.md" -and $content -notmatch '1045') {
+                Add-Finding $rel 0 'WARN' 'release_test_count' 'v15.3.1.md should document 1045 assertion gate'
             }
         }
     }
@@ -290,8 +293,11 @@ $install = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -notmatch "\`$WG_KS_VERSION = '$CURRENT_VER'") {
     Add-Finding 'lib/Install-Constants.ps1' 0 'ERROR' 'version_mismatch' "WG_KS_VERSION must be $CURRENT_VER"
 }
-if ($install -notmatch 'v15\.3\.0') {
-    Add-Finding 'install.ps1' 0 'ERROR' 'version_mismatch' 'install.ps1 header must reference v15.3.0'
+if ($install -notmatch 'v15\.3\.1') {
+    Add-Finding 'install.ps1' 0 'ERROR' 'version_mismatch' 'install.ps1 header must reference v15.3.1'
+}
+if ($install -notmatch 'Invoke-PreFlightInternetGuard') {
+    Add-Finding 'install.ps1' 0 'ERROR' 'ai_invariant' 'install.ps1 must call Invoke-PreFlightInternetGuard (AI Connection Invariant)'
 }
 
 # Write outputs (materialize strings before Set-Content - safe under x3 test-suite runs)

@@ -1,4 +1,4 @@
-# Comprehensive offline test suite - v15.3.0 rigor gate (no hollow tests)
+# Comprehensive offline test suite - v15.3.1 rigor gate (no hollow tests)
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -55,7 +55,7 @@ function Test-ExtractedScript {
 }
 
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Kill Switch FULL TEST SUITE (v15.3.0 - rigor gate)' -ForegroundColor Cyan
+Write-Host '  Kill Switch FULL TEST SUITE (v15.3.1 - rigor gate)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 $libDir = Join-Path $repoRoot 'lib'
@@ -71,7 +71,7 @@ Test-ParseFile $installPath 'install.ps1' | Out-Null
 foreach ($lf in $libFiles) {
     Test-ParseFile $lf.FullName "lib/$($lf.Name)" | Out-Null
 }
-Assert-True ($libFiles.Count -ge 9) 'lib/ has 9+ modules (v15.2 safe-network)'
+Assert-True ($libFiles.Count -ge 10) 'lib/ has 10+ modules (v15.3.1 dry-run preview)'
 
 $contentMap = Get-FileContentMap $repoRoot
 $genRaw = $contentMap['lib/Install-GeneratedScripts.ps1']
@@ -83,7 +83,7 @@ $v15StackRaw = $contentMap['scripts/install-v15-privacy-stack.ps1']
 $v14StackRaw = $contentMap['scripts/install-v14-stack.ps1']
 
 # [2] File-scoped patterns (not hollow rawCombined)
-Write-Host "[2/17] File-scoped v15.3.0 patterns" -ForegroundColor Yellow
+Write-Host "[2/17] File-scoped v15.3.1 patterns" -ForegroundColor Yellow
 foreach ($row in (Get-FileScopedPatternMatrix)) {
     foreach ($item in (Get-PatternMatrixEntries $row)) {
         $found = $false
@@ -190,9 +190,20 @@ Assert-True ($main06Raw -match 'CustomEndpointIP requires -CustomConfig') 'Custo
 $adminIdx = $installRaw.IndexOf('Administrator')
 $dryRunIdx = $installRaw.IndexOf('$script:InstallDryRun')
 $dotSourceIdx = $installRaw.IndexOf('foreach ($mod in $LibModules)')
+$preFlightIdx = $installRaw.IndexOf('Invoke-PreFlightInternetGuard')
+$dryRunPreviewIdx = $installRaw.IndexOf('Invoke-InstallDryRunPreview')
 Assert-True (($adminIdx -ge 0) -and ($dryRunIdx -gt $adminIdx) -and ($dotSourceIdx -gt $dryRunIdx)) 'admin check before dot-source'
-Assert-True ($installRaw -match 'if \(\$script:InstallDryRun\) \{[\s\S]*?exit 0') 'DryRun: early exit after steps 0-6 (no steps 7-20)'
-Assert-True ($installRaw -match 'ZERO-SIDE-EFFECT') 'DryRun: zero-side-effect banner'
+Assert-True (($preFlightIdx -gt $dotSourceIdx) -and ($dryRunPreviewIdx -gt $preFlightIdx)) 'pre-flight before DryRun preview'
+Assert-True ($installRaw -match 'AI CONNECTION INVARIANT') 'install.ps1: AI Connection Invariant documented'
+Assert-True ($installRaw -match 'Invoke-PreFlightInternetGuard') 'install.ps1: pre-flight quiesce on every run'
+Assert-True ($installRaw -match 'Invoke-InstallDryRunPreview') 'DryRun: preview-only path (steps 0-20 skipped)'
+Assert-True ($installRaw -match 'if \(\$script:InstallDryRun\) \{[\s\S]*?exit 0') 'DryRun: early exit before MainSteps 0-20'
+Assert-True ($main06Raw -match 'must never run in DryRun') 'MainSteps 0-6: hard throw guard in DryRun'
+$dryRunPreviewRaw = $contentMap['lib/Install-DryRunPreview.ps1']
+if ($dryRunPreviewRaw) {
+    Assert-True ($dryRunPreviewRaw -match 'Invoke-InstallDryRunPreview') 'Install-DryRunPreview.ps1: preview function'
+    Assert-True ($dryRunPreviewRaw -match 'zero network mutations') 'DryRun preview: zero mutations banner'
+} else { $failures.Add('lib/Install-DryRunPreview.ps1 missing') }
 $genRaw = $contentMap['lib/Install-GeneratedScripts.ps1']
 $tasksRaw = $contentMap['lib/Install-TasksAndWmi.ps1']
 $main1820Raw = $contentMap['lib/Install-MainSteps-18-20.ps1']

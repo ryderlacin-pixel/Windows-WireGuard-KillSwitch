@@ -191,11 +191,14 @@ Write-Host '[H2] Release notes + ci.ps1 + emergency.bat' -ForegroundColor Yellow
 if ($bat) {
     Assert-Coverage ($bat -match 'EnableExtensions') 'emergency-reset.bat: setlocal' 'emergency-reset.bat'
 }
-$releasePath = Join-Path $repoRoot 'docs\releases\v15.3.0.md'
-if (Test-Path $releasePath) {
-    $relNote = Get-Content -LiteralPath $releasePath -Raw -Encoding UTF8
-    Assert-Coverage ($relNote -match '15\.3\.0') 'v15.3.0.md mentions version' 'docs/releases/v15.3.0.md'
-    Assert-Coverage ($relNote.Length -gt 100) 'v15.3.0.md non-trivial content' 'docs/releases/v15.3.0.md'
+foreach ($relTag in @('v15.3.1', 'v15.3.0')) {
+    $releasePath = Join-Path $repoRoot "docs\releases\$relTag.md"
+    if (Test-Path $releasePath) {
+        $relNote = Get-Content -LiteralPath $releasePath -Raw -Encoding UTF8
+        $verPat = $relTag -replace 'v', '' -replace '\.', '\.'
+        Assert-Coverage ($relNote -match $verPat) "$relTag.md mentions version" "docs/releases/$relTag.md"
+        Assert-Coverage ($relNote.Length -gt 100) "$relTag.md non-trivial content" "docs/releases/$relTag.md"
+    }
 }
 $ciRaw = $contentMap['scripts/ci.ps1']
 if ($ciRaw) {
@@ -226,7 +229,10 @@ if ($install) {
     $adminIdx = $install.IndexOf('Administrator')
     $dryRunIdx = $install.IndexOf('$script:InstallDryRun')
     $dotSourceIdx = $install.IndexOf('foreach ($mod in $LibModules)')
+    $preFlightIdx = $install.IndexOf('Invoke-PreFlightInternetGuard')
+    $dryRunPreviewIdx = $install.IndexOf('Invoke-InstallDryRunPreview')
     Assert-Coverage (($adminIdx -ge 0) -and ($dryRunIdx -gt $adminIdx) -and ($dotSourceIdx -gt $dryRunIdx)) 'install.ps1: admin before dot-source' 'install.ps1'
+    Assert-Coverage (($preFlightIdx -gt $dotSourceIdx) -and ($dryRunPreviewIdx -gt $preFlightIdx)) 'install.ps1: pre-flight before DryRun preview' 'install.ps1'
 }
 
 $coveredFiles = $script:fileCheckCounts.Keys.Count

@@ -23,7 +23,7 @@ function Extract-HeredocAtSingleQuote([string]$Raw, [string]$VarName) {
 function Get-SimulatedRepairContent {
     param(
         [string]$GenRaw,
-        [string]$Version = '15.3.0'
+        [string]$Version = '15.3.1'
     )
     if ([string]::IsNullOrWhiteSpace($GenRaw)) { return $null }
     $m = [regex]::Match($GenRaw, '(?s)"@\s*\+\s*@''(.*?)''@\s*\r?\n\$repairContent\s*\|', 'Singleline')
@@ -61,7 +61,7 @@ function Get-ExtractedGeneratedScripts {
         $script:InstallDryRun = $true
         $script:EnableFailsafe = $true
         . $safeNetPath
-        $safety = Get-WgSafetyRuntimeScript -Version '15.3.0'
+        $safety = Get-WgSafetyRuntimeScript -Version '15.3.1'
     }
     return [PSCustomObject]@{
         GenRaw    = $genRaw
@@ -154,9 +154,11 @@ function Get-ProductionFileManifest {
         }
     }
 
-    $releaseNote = Join-Path $RepoRoot 'docs\releases\v15.3.0.md'
-    if (Test-Path $releaseNote) {
-        $entries.Add([PSCustomObject]@{ RelPath = 'docs/releases/v15.3.0.md'; Group = 'docs'; MinChecks = 2 })
+    foreach ($relTag in @('v15.3.1', 'v15.3.0')) {
+        $releaseNote = Join-Path $RepoRoot "docs\releases\$relTag.md"
+        if (Test-Path $releaseNote) {
+            $entries.Add([PSCustomObject]@{ RelPath = "docs/releases/$relTag.md"; Group = 'docs'; MinChecks = 2 })
+        }
     }
 
     return $entries
@@ -225,19 +227,20 @@ function Get-ForbiddenPatternMatrix {
 
 function Get-FileScopedPatternMatrix {
     return @(
-        @{ Files = @('install.ps1'); Must = @('v15.3.0', '15.3.0', '$LibRoot', 'Install-Constants.ps1', 'Set-Location -LiteralPath $PSScriptRoot', 'v15.1', 'v15.0', 'v14.0', '14.0', 'Invoke-InstallMainSteps0to6', 'Invoke-InstallGeneratedScripts', 'Invoke-InstallUpgradeEarlyExit', 'install-v14-stack.ps1', 'install-v15-privacy-stack.ps1') }
-        @{ Files = @('lib/Install-Constants.ps1'); Must = @('$WG_KS_VERSION', '15.3.0', 'C:\ProgramData\WGKillSwitchGuard', 'webrtc-leak-guard.ps1', 'dnscrypt-guard.ps1', 'leak-sentinel.ps1', 'tor-hardening-guard.ps1') }
+        @{ Files = @('install.ps1'); Must = @('v15.3.1', '15.3.1', 'AI CONNECTION INVARIANT', 'Invoke-PreFlightInternetGuard', 'Invoke-InstallDryRunPreview', 'Install-DryRunPreview.ps1', '$LibRoot', 'Install-Constants.ps1', 'Set-Location -LiteralPath $PSScriptRoot', 'v15.1', 'v15.0', 'v14.0', '14.0', 'Invoke-InstallMainSteps0to6', 'Invoke-InstallGeneratedScripts', 'Invoke-InstallUpgradeEarlyExit', 'install-v14-stack.ps1', 'install-v15-privacy-stack.ps1') }
+        @{ Files = @('lib/Install-Constants.ps1'); Must = @('$WG_KS_VERSION', '15.3.1', 'C:\ProgramData\WGKillSwitchGuard', 'webrtc-leak-guard.ps1', 'dnscrypt-guard.ps1', 'leak-sentinel.ps1', 'tor-hardening-guard.ps1') }
         @{ Files = @('lib/Install-Helpers.ps1'); Must = @('Register-RepairTaskDualTrigger', 'Refresh-RegistryTaskBackups', 'Backup-TunnelConfig', 'Restore-TunnelConfigIfMissing', 'Invoke-GuardScriptSafe', 'Test-SafeToOpen', 'Restore-DhcpDnsOnPhysicalAdapters', 'Test-InstallHealthStable', 'Clear-InstallLock', 'TaskXMLRepair', 'Get-WmiBindFilter', 'Invoke-DeferredPrivacyGuards', 'Ensure-DnscryptTomlFile', 'Remove-IPv6FromConfig', 'Test-WmiSubscriptionActive') }
         @{ Files = @('lib/Install-Privacy.ps1'); Must = @('Get-ScriptSha256', 'Install-PrivacyHardening', 'privacy-hardening-guard.ps1', 'Install-WindowsTelemetryReduction', 'BlockThirdPartyCookies', 'DisableWindowsConsumerFeatures', 'privacy.resistFingerprinting', 'AllowTelemetry', 'Install-BrowserPrivacyPolicies', 'WebRtcIpHandlingPolicy', 'default_public_interface_only', 'Get-ChromiumPrivacyDWordProps', 'Write-PrivacyHardeningGuardPs1', 'Install-ScriptIntegrityVault', 'Test-ScriptIntegrityVault', 'DnsOverHttpsMode', 'PrivacySandboxAdTopicsEnabled', 'QuicAllowed', 'fingerprintingProtection', 'webgl.disabled', 'consumer telemetry reduced (not eliminated)', 'Ensure-DelayedAutoStart', 'Test-DelayedAutoStart', 'Remove-KurtarArtifacts', 'Write-GuardBackups', '\[Startup\]'); MustRegex = @("powershell\.exe' OR TargetInstance\.Name='pwsh\.exe") }
-        @{ Files = @('lib/Install-SafeNetwork.ps1'); Must = @('Install-SafeNetwork.ps1', 'Test-BootSafeWindow', 'Get-OsUptimeSeconds', 'Test-IsVirtualTunnelAdapter', 'Disable-TunnelIPv6BindingsOnly', 'Add-KillSwitchFirewallExemptions', 'Add-KillSwitchCatchAllBlocks', 'Enable-KillSwitchBlock', 'Disable-KillSwitchBlock', 'Invoke-FailOpenSafeguard', 'wg-safety.ps1', 'KS-DHCP-Bcast-Out', 'KS-Gateway-Out', 'KS-Gateway-In', 'Invoke-SafeNetsh', 'Invoke-SafeRegistrySet', 'InstallDryRun', 'EnableFailsafe', 'function Get-WgSafetyRuntimeScript', 'function Set-PostInstallGraceRegistry', 'PostInstallGraceUntil', 'function Test-PostInstallGrace', 'function Test-KillSwitchArmed', 'function Set-KillSwitchArmedRegistry', 'KillSwitchArmed') }
-        @{ Files = @('lib/Install-MainSteps-0-6.ps1'); Must = @('Invoke-InstallMainSteps0to6', 'Remove-InstallBlocks', 'Remove-KurtarArtifacts', 'Invoke-SafeNetsh', 'blocks deferred until install completes', 'firewallpolicy blockinbound,allowoutbound', 'CustomEndpointIP requires -CustomConfig', 'Remove-IPv6FromConfig'); MustRegex = @('KS-DNS-Block.*enable=no') }
+        @{ Files = @('lib/Install-SafeNetwork.ps1'); Must = @('Install-SafeNetwork.ps1', 'function Invoke-PreFlightInternetGuard', 'AI CONNECTION INVARIANT', 'Test-BootSafeWindow', 'Get-OsUptimeSeconds', 'Test-IsVirtualTunnelAdapter', 'Disable-TunnelIPv6BindingsOnly', 'Add-KillSwitchFirewallExemptions', 'Add-KillSwitchCatchAllBlocks', 'Enable-KillSwitchBlock', 'Disable-KillSwitchBlock', 'Invoke-FailOpenSafeguard', 'wg-safety.ps1', 'KS-DHCP-Bcast-Out', 'KS-Gateway-Out', 'KS-Gateway-In', 'Invoke-SafeNetsh', 'Invoke-SafeRegistrySet', 'InstallDryRun', 'EnableFailsafe', 'function Get-WgSafetyRuntimeScript', 'function Set-PostInstallGraceRegistry', 'PostInstallGraceUntil', 'function Test-PostInstallGrace', 'function Test-KillSwitchArmed', 'function Set-KillSwitchArmedRegistry', 'KillSwitchArmed') }
+        @{ Files = @('lib/Install-DryRunPreview.ps1'); Must = @('Invoke-InstallDryRunPreview', 'read-only', 'zero network mutations', 'AI CONNECTION INVARIANT', 'Steps 0-20') }
+        @{ Files = @('lib/Install-MainSteps-0-6.ps1'); Must = @('Invoke-InstallMainSteps0to6', 'must never run in DryRun', 'Remove-InstallBlocks', 'Remove-KurtarArtifacts', 'Invoke-SafeNetsh', 'blocks deferred until install completes', 'firewallpolicy blockinbound,allowoutbound', 'CustomEndpointIP requires -CustomConfig', 'Remove-IPv6FromConfig'); MustRegex = @('KS-DNS-Block.*enable=no') }
         @{ Files = @('lib/Install-MainSteps-18-20.ps1'); Must = @('STEP 18b - PRIVACY', 'STEP 18c - V14 DNS', 'STEP 18f - V15', 'Test-DnscryptListening', 'Set-PostInstallGraceRegistry', 'Set-KillSwitchArmedRegistry', 'Test-InstallHealthStable', 'Set-BootGraceRegistry', 'Remove-InstallBlocks', 'Ensure-DelayedAutoStart', 'Test-DelayedAutoStart', 'Remove-KurtarArtifacts', 'Invoke-DeferredPrivacyGuards', 'webrtc-leak-guard.ps1', 'emergency-reset.ps1', 'emergency-reset.bat') }
         @{ Files = @('lib/Install-GeneratedScripts.ps1'); Must = @('Invoke-InstallGeneratedScripts', 'function Test-IsMainMonitor', 'function Sync-KillSwitchState', 'monitor-only block authority', 'Test-KillSwitchArmed', 'Test-PostInstallGrace', 'network-privacy-guard.ps1', 'function Try-ReinstallTunnel', 'monitor active, deferring reinstall', 'Test-MainMonitorActive', 'deferring reinstall', 'tunnel recovery delegated', 'anti-tamper.ps1', 'Invoke-AntiTamperGuard', 'NoChainRepair', 'graduated fail-open', 'never tears down protection', 'watchdog will deep-unbrick', 'cmd.exe /c', 'Fail-open hold at startup', 'Tunnel lost (confirmed 5x/10s)', '60s hold', 'tamperTick', 'Test-ServerRulePresent', 'Set-ServerRule', 'Start-HiddenScript', '8.8.8.8', 'hits -ge 2', 'Repair-ConfigIntegrity', 'Repair-EssentialFirewall', 'Test-NetworkChanged', 'NetworkFingerprint', 'Test-BlockRulePresent', 'protection stays installed', 'Invoke-EmergencyUnbrick', 'EMERGENCY UNBRICK', 'Invoke-DeepUnbrick', 'WGTunnelInstallMutex', 'Remove-OtherMonitorProcs', 'oldCmd -match', 'Log-Tamper', 'Restore-WmiSubscription', 'wmi-cooldown', 'WmiCooldownActive', 'Test-WmiSubscriptionActive', 'STEP 10d - V14', 'STEP 10e - V15', 'if (`$rewrite -or -not (Test-ServerRulePresent))'); MustRegex = @('Sync-KillSwitchState\r?\n\} finally') }
         @{ Files = @('lib/Install-TasksAndWmi.ps1'); Must = @('Install-WmiSubscription', 'Split-Path $PSScriptRoot -Parent', '$installScripts = Join-Path $INSTALL_DIR', 'Minutes 15', 'WG-RebootVerify', 'post-reboot-verify', 'RebootVerifyPath', 'ScriptsPath', 'TunnelName', 'WGKillSwitchGuard', 'Write-GuardBackups', 'GPO: zombie tunnel') }
         @{ Files = @('lib/Install-UpgradePaths.ps1'); Must = @('Invoke-InstallUpgradeEarlyExit', 'v15.2', '15.2', 'StrongPrivacyUpgrade', 'DnsLeakUpgradeOnly', 'TorUpgradeOnly', 'FullPrivacyUpgrade', 'Invoke-V14DnsLeakStack', 'Invoke-V15StrongPrivacyStack', 'PrivacyUpgradeOnly', 'safe-live-verify.ps1', 'webrtc-leak-guard.ps1 forwarder written', 'leak-sentinel') }
         @{ Files = @('install.ps1', 'lib/Install-Helpers.ps1'); Must = @('$ErrorActionPreference = "Continue"') }
         @{ Files = @('_installLibCombined'); Must = @('Write-Step', 'Test-InstallInProgress', 'install.inprogress', 'v11.3', 'v11.2', 'v11.1') }
-        @{ Files = @('scripts/final-line-audit.ps1'); Must = @('Get-CompleteRepoManifest', 'Add-Finding', 'Test-Ps1FileDeep', 'findings.jsonl', 'final-audit-summary.md', '15.3.0') }
+        @{ Files = @('scripts/final-line-audit.ps1'); Must = @('Get-CompleteRepoManifest', 'Add-Finding', 'Test-Ps1FileDeep', 'findings.jsonl', 'final-audit-summary.md', '15.3.1') }
     )
 }
 

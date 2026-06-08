@@ -264,6 +264,53 @@ function Set-KillSwitchArmedRegistry {
     } catch {}
 }
 
+function Invoke-PreFlightInternetGuard {
+    # AI CONNECTION INVARIANT: always runs (even -DryRun). Restores internet before any install logic.
+    param([string]$LogPrefix = '[PRE-FLIGHT]')
+    $logPath = 'C:\WireGuard\killswitch.log'
+    function Write-PreFlightLog([string]$m) {
+        $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | $LogPrefix $m"
+        if (Get-Command Write-Info -ErrorAction SilentlyContinue) { Write-Info $line }
+        try {
+            New-Item -ItemType Directory -Path 'C:\WireGuard' -Force | Out-Null
+            Add-Content $logPath $line -Encoding UTF8 -ErrorAction SilentlyContinue
+        } catch {}
+    }
+    Write-PreFlightLog 'AI-safe quiesce starting (protect Cursor/AI connection)'
+    foreach ($tn in @('\WG-KillSwitch', '\WG-RepairTask', '\WG-InternetWatchdog', '\WG-RebootVerify')) {
+        schtasks /End /TN $tn 2>$null | Out-Null
+        schtasks /Change /TN $tn /DISABLE 2>$null | Out-Null
+    }
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @('powershell.exe', 'pwsh.exe') -and $_.CommandLine -match 'monitor\.ps1|repair\.ps1|internet-watchdog|anti-tamper|wmi-repair' } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-PreFlightLog "Stopped PID $($_.ProcessId)"
+        }
+    if (Get-Command Stop-AllMonitorProcs -ErrorAction SilentlyContinue) { Stop-AllMonitorProcs }
+    & sc.exe stop WGKillSwitchSvc 2>$null | Out-Null
+    foreach ($rule in @(
+        'KS-Block-WiFi-Out', 'KS-Block-Ethernet-Out', 'KS-Block-RemoteAccess-Out', 'KS-Block-PPP-Out',
+        'KS-Block-IPv6-Out', 'KS-Block-IPv6-In'
+    )) {
+        netsh advfirewall firewall delete rule name="$rule" 2>$null | Out-Null
+    }
+    netsh advfirewall firewall set rule name="KS-DNS-Block" new enable=no 2>$null | Out-Null
+    netsh advfirewall firewall set rule name="KS-DNS-Block-TCP" new enable=no 2>$null | Out-Null
+    netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>$null | Out-Null
+    try {
+        $grace = (Get-Date).AddMinutes(30).ToString('o')
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'UnbrickUntil' $grace -Force
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'PostInstallGraceUntil' $grace -Force
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'KillSwitchArmed' 0 -Type DWord -Force
+        Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -ErrorAction SilentlyContinue
+    } catch {}
+    Remove-Item 'C:\WireGuard\install.inprogress' -Force -ErrorAction SilentlyContinue
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+    Write-PreFlightLog 'AI-safe quiesce complete - internet fail-open for preview/install'
+}
+
 function Get-WgSafetyRuntimeScript {
     param([string]$Version = '15.2')
     $bootSec = $script:BOOT_SAFE_WINDOW_SEC

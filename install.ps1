@@ -1,19 +1,23 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.3.0)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.3.1)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
+#
+# AI CONNECTION INVARIANT (v15.3.1 - NEVER violate):
+# If install or -DryRun kills internet, the user's Cursor/AI session dies too.
+# - Pre-flight quiesce runs FIRST on every invocation (including -DryRun).
+# - -DryRun is read-only preview only; MainSteps 0-20 NEVER execute.
 #
 # DESIGN PHILOSOPHY (for code reviewers):
 # - Zero third-party dependencies. 100% native Windows (PowerShell + netsh + WMI + Task Scheduler + NSSM)
 # - Self-healing: WMI Permanent Event Subscription respawns monitor if killed.
 # - Install-safe: install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade.
 # - Internet opens only when tunnel RUNNING and Test-Internet passes (zombie-tunnel prevention).
+# - v15.3: KillSwitchArmed gate, DNS lock manual-only, 60min post-install grace.
 # - v15.2: boot-safe window (90s), DHCP/gateway exemptions, tunnel-only IPv6 bind, fail-open + DryRun.
-# - v15.1: lib/ modular split; WARP-first docs; one-step Hassas-Tarama; optional CI live-smoke.
-# - v11.3: anti-tamper guard; v11.2: WG-RebootVerify; v11.1: monitor singleton hardening.
-# - v15.0: DNS lock, network privacy, strict dnscrypt, leak-sentinel v15, sensitive-mode.
-# - v14.0: dnscrypt-proxy + Tor hardening + leak-sentinel.
+# - v15.1: lib/ modular split; v15.0: strong privacy stack; v14.0 / 14.0: dnscrypt + Tor guards.
+# - v11.3: anti-tamper guard; v11.2: reboot verify; v11.1: monitor singleton.
 # - Test-Internet: 2-of-3 hosts; server rule rewrite only on IP change.
 # ================================================================
 #Requires -RunAsAdministrator
@@ -51,6 +55,7 @@ $LibModules = @(
     'Install-Helpers.ps1',
     'Install-Privacy.ps1',
     'Install-UpgradePaths.ps1',
+    'Install-DryRunPreview.ps1',
     'Install-MainSteps-0-6.ps1',
     'Install-GeneratedScripts.ps1',
     'Install-TasksAndWmi.ps1',
@@ -72,25 +77,31 @@ if (Test-Path $v14StackPath) { . $v14StackPath } else { Write-Host ' [WARN] inst
 $v15StackPath = Join-Path $PSScriptRoot 'scripts\install-v15-privacy-stack.ps1'
 if (Test-Path $v15StackPath) { . $v15StackPath } else { Write-Host ' [WARN] install-v15-privacy-stack.ps1 missing - v15 features disabled' -ForegroundColor Yellow }
 
+Invoke-PreFlightInternetGuard
+
 if ($DryRun) {
-    Write-Host "`n [DRY-RUN] ZERO-SIDE-EFFECT mode (v$WG_KS_VERSION)" -ForegroundColor Yellow
-    Write-Host "           Steps 0-6: network/registry mutations logged only (no netsh/registry apply)." -ForegroundColor Gray
-    Write-Host "           Steps 7-20: SKIPPED entirely (no scripts, tasks, WMI, monitor, guards)." -ForegroundColor Gray
-    Write-Host "           Re-run without -DryRun for a full install." -ForegroundColor Gray
+    Write-Host "`n [DRY-RUN] READ-ONLY PREVIEW (v$WG_KS_VERSION)" -ForegroundColor Yellow
+    Write-Host "           Pre-flight quiesce completed - AI connection protected." -ForegroundColor Gray
+    Write-Host "           Steps 0-20: NOT executed (zero downloads, installs, or network mutations)." -ForegroundColor Gray
+    Write-Host "           Re-run without -DryRun for full install." -ForegroundColor Gray
 }
 
 if (Invoke-InstallUpgradeEarlyExit) { exit 0 }
 
-try {
-Invoke-InstallMainSteps0to6
 if ($script:InstallDryRun) {
-    Write-Step 'DRY-RUN COMPLETE'
-    OK 'Preview finished - zero persistence deployed (steps 7-20 skipped)'
-    Write-Host "`n [DRY-RUN] No firewall rules, tasks, monitor, or guards were activated." -ForegroundColor Green
-    Write-Host "           Your network was not modified by steps 7-20." -ForegroundColor Green
+    try {
+        Invoke-InstallDryRunPreview
+    } catch {
+        Write-Err "DryRun preview fatal: $_"
+        if (-not $NoPause) { pause }
+        exit 1
+    }
     if (-not $NoPause) { pause }
     exit 0
 }
+
+try {
+Invoke-InstallMainSteps0to6
 Invoke-InstallGeneratedScripts
 Invoke-InstallTasksAndWmi
 Invoke-InstallMainSteps18to20
