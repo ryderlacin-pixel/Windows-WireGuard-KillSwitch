@@ -12,12 +12,16 @@
 
   # Create only v15.2:
   .\scripts\publish-releases.ps1 -Only v15.2
+
+  # Publish release + upload FINAL zip and SHA256SUMS:
+  .\scripts\publish-releases.ps1 -Only v15.3.1 -UploadAssets
 #>
 param(
     [string]$Token = $env:GITHUB_TOKEN,
     [string]$Owner = "ryderlacin-pixel",
     [string]$Repo  = "Windows-WireGuard-KillSwitch",
-    [string]$Only  = ""
+    [string]$Only  = "",
+    [switch]$UploadAssets
 )
 
 $ErrorActionPreference = "Stop"
@@ -102,32 +106,78 @@ function Get-ReleaseBody($tag) {
 }
 
 function Publish-Release($tag, $name, $body) {
+    $releaseId = $null
     try {
         $existing = Invoke-GH GET "https://api.github.com/repos/$Owner/$Repo/releases/tags/$tag" $null
         Write-Host "  UPDATE: $tag (release id $($existing.id))" -ForegroundColor Yellow
-        Invoke-GH PATCH "https://api.github.com/repos/$Owner/$Repo/releases/$($existing.id)" @{
+        $updated = Invoke-GH PATCH "https://api.github.com/repos/$Owner/$Repo/releases/$($existing.id)" @{
             name       = $name
             body       = $body
             draft      = $false
             prerelease = $false
-        } | Out-Null
+        }
+        $releaseId = $updated.id
         Write-Host "  OK: $tag updated" -ForegroundColor Green
     } catch {
         try {
-            Invoke-GH POST "https://api.github.com/repos/$Owner/$Repo/releases" @{
+            $created = Invoke-GH POST "https://api.github.com/repos/$Owner/$Repo/releases" @{
                 tag_name         = $tag
                 target_commitish = "main"
                 name             = $name
                 body             = $body
                 draft            = $false
                 prerelease       = $false
-            } | Out-Null
+            }
+            $releaseId = $created.id
             Write-Host "  OK: $tag created" -ForegroundColor Green
         } catch {
             Write-Host "  FAIL $tag : $($_.Exception.Message)" -ForegroundColor Red
             if ($_.ErrorDetails.Message) { Write-Host "         $($_.ErrorDetails.Message)" -ForegroundColor DarkRed }
         }
     }
+    return $releaseId
+}
+
+function Upload-ReleaseAsset {
+    param(
+        [long]$ReleaseId,
+        [string]$FilePath,
+        [string]$Label = ''
+    )
+    if (-not (Test-Path $FilePath)) {
+        Write-Host "  SKIP asset (missing): $FilePath" -ForegroundColor Yellow
+        return $false
+    }
+    $fileName = [IO.Path]::GetFileName($FilePath)
+    $uri = "https://uploads.github.com/repos/$Owner/$Repo/releases/$ReleaseId/assets?name=$fileName"
+    $assetHeaders = @{
+        Authorization          = "Bearer $Token"
+        Accept                 = "application/vnd.github+json"
+        "X-GitHub-Api-Version" = "2022-11-28"
+    }
+    try {
+        $bytes = [IO.File]::ReadAllBytes($FilePath)
+        Invoke-RestMethod -Method POST -Uri $uri -Headers $assetHeaders -Body $bytes -ContentType 'application/octet-stream' | Out-Null
+        Write-Host "  OK: asset uploaded $fileName" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "  FAIL asset $fileName : $($_.Exception.Message)" -ForegroundColor Red
+        if ($_.ErrorDetails.Message) { Write-Host "         $($_.ErrorDetails.Message)" -ForegroundColor DarkRed }
+        return $false
+    }
+}
+
+function Get-DefaultAssetPaths($tag) {
+    $ver = $tag -replace '^v', ''
+    $candidates = @(
+        (Join-Path $env:USERPROFILE "Downloads\WGKillSwitch-$tag-FINAL.zip"),
+        (Join-Path $repoRoot "WGKillSwitch-$tag-FINAL.zip"),
+        (Join-Path $env:USERPROFILE "Downloads\WGKillSwitch-v$ver-FINAL.zip")
+    )
+    foreach ($p in $candidates) {
+        if (Test-Path $p) { return $p }
+    }
+    return $null
 }
 
 Write-Host "=== Publish GitHub Releases ===" -ForegroundColor Cyan
@@ -140,7 +190,21 @@ foreach ($tag in $toPublish) {
     }
     $r = $releases[$tag]
     $body = Get-ReleaseBody $tag
-    Publish-Release $tag $r.name $body
+    $releaseId = Publish-Release $tag $r.name $body
+    if ($UploadAssets -and $releaseId) {
+        $zipPath = Get-DefaultAssetPaths $tag
+        if ($zipPath) {
+            Upload-ReleaseAsset -ReleaseId $releaseId -FilePath $zipPath | Out-Null
+            $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+            $shaFile = Join-Path $env:TEMP "SHA256SUMS-$tag.txt"
+            Set-Content -LiteralPath $shaFile -Value "$hash  $(Split-Path $zipPath -Leaf)" -Encoding ASCII -NoNewline
+            Upload-ReleaseAsset -ReleaseId $releaseId -FilePath $shaFile | Out-Null
+            Remove-Item $shaFile -Force -ErrorAction SilentlyContinue
+            Write-Host "  SHA256: $hash" -ForegroundColor Gray
+        } else {
+            Write-Host "  WARN: no FINAL zip found for $tag (checked Downloads and repo root)" -ForegroundColor Yellow
+        }
+    }
 }
 
 Write-Host ""
