@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v11.4)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v11.5)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v11.5: Try-ReinstallTunnel polls sc.exe start up to 30s; monitor auto-unbrick after prolonged failure
+#   (removes blocks + retries tunnel so user is never left without internet indefinitely).
 # - v11.4: tunnel reinstall mutex shared by monitor/repair/kurtar; repair defers to active monitor;
 #   SVC stops spawning repair every 5s during monitor recovery (fixes concurrent reinstall brick).
 # - v11.3: anti-tamper guard — silent restore when tasks/scripts/firewall/WMI/service deleted.
@@ -336,7 +338,7 @@ function Install-WmiSubscription {
 function Write-KurtarScript {
     $kurtarTunnelSvc = $TUNNEL_SVC
     $kurtarContent = @"
-# WG Kill Switch - KURTAR v11.4 (emergency restore, works 100% offline)
+# WG Kill Switch - KURTAR v11.5 (emergency restore, works 100% offline)
 #Requires -RunAsAdministrator
 `$TUNNEL_SVC  = '$kurtarTunnelSvc'
 `$TUNNEL_NAME = '$TUNNEL_NAME'
@@ -354,6 +356,7 @@ function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
 function Try-ReinstallTunnel {
     `$mux = `$null
     try {
+        if (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING') { return `$true }
         `$mux = New-Object System.Threading.Mutex(`$false, 'Global\WGTunnelInstallMutex')
         if (-not (Wait-NamedMutex `$mux 120000)) {
             Write-Host '[!!] Tunnel mutex timeout' -ForegroundColor Yellow
@@ -363,17 +366,24 @@ function Try-ReinstallTunnel {
         `$wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='`$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
         if (`$wgSvcPid -and `$wgSvcPid -gt 0) { Stop-Process -Id `$wgSvcPid -Force -EA SilentlyContinue }
         Start-Sleep -Seconds 2
-        & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
-        Start-Sleep -Seconds 4
-        & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
-        Start-Sleep -Seconds 12
-        return (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
+        for (`$attempt = 1; `$attempt -le 2; `$attempt++) {
+            & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
+            Start-Sleep -Seconds 4
+            & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
+            & sc.exe start `$TUNNEL_SVC 2>`$null | Out-Null
+            `$waited = 0
+            while (`$waited -lt 30 -and -not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
+                Start-Sleep -Seconds 3; `$waited += 3
+            }
+            if (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING') { return `$true }
+        }
+        return `$false
     } finally {
         if (`$mux) { try { `$mux.ReleaseMutex() } catch {} }
     }
 }
 
-Write-Host '=== WG KURTAR v11.4 (emergency restore) ===' -ForegroundColor Cyan
+Write-Host '=== WG KURTAR v11.5 (emergency restore) ===' -ForegroundColor Cyan
 foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
     netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
 }
@@ -393,7 +403,7 @@ if (-not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
     }
 }
 `$running = (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
-Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR] Emergency restore v11.4 - tunnel=`$running" -Encoding UTF8 -EA SilentlyContinue
+Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR] Emergency restore v11.5 - tunnel=`$running" -Encoding UTF8 -EA SilentlyContinue
 Write-Host "[OK] Internet restored (tunnel=`$running)" -ForegroundColor Green
 Write-Host "     Re-run install.ps1 when ready to re-apply kill switch." -ForegroundColor Gray
 "@
@@ -482,7 +492,7 @@ function Write-GuardBackups {
     Get-ChildItem $GUARD_DIR -File -EA SilentlyContinue | ForEach-Object { attrib +H +S $_.FullName 2>$null | Out-Null }
 
     New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'Version' '11.4' -Force
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'Version' '11.5' -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GuardDir' $GUARD_DIR -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'StartupLnk' $STARTUP_LNK -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GpoScript' $GPO_SCRIPT -Force
@@ -864,7 +874,7 @@ $monitorPort       = $serverPort
 $monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 
 $monitorContent = @"
-# WireGuard Kill Switch - Monitor v11.4 (auto-generated by install.ps1)
+# WireGuard Kill Switch - Monitor v11.5 (auto-generated by install.ps1)
 `$TUNNEL_SVC   = '$monitorTunnelSvc'
 `$TUNNEL_NAME  = '$monitorTunnelName'
 `$CONFIG       = '$monitorConfig'
@@ -1035,23 +1045,50 @@ function Ensure-ServerRule {
 function Try-ReinstallTunnel {
     `$mux = `$null
     try {
+        if (Test-TunnelRunning) { return `$true }
         `$mux = New-Object System.Threading.Mutex(`$false, 'Global\WGTunnelInstallMutex')
-        if (-not (Wait-NamedMutex `$mux 60000)) {
+        if (-not (Wait-NamedMutex `$mux 90000)) {
             Log "TunnelReinstall: mutex timeout"
             return (Test-TunnelRunning)
         }
+        if (Test-TunnelRunning) { return `$true }
         Get-Process -Name "wireguard" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
         `$wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='`$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
         if (`$wgSvcPid -and `$wgSvcPid -gt 0) { Stop-Process -Id `$wgSvcPid -Force -EA SilentlyContinue }
-        Start-Sleep -Seconds 1
-        & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null
-        Start-Sleep -Seconds 3
-        & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null
-        Start-Sleep -Seconds 10
-        return (Test-TunnelRunning)
+        Start-Sleep -Seconds 2
+        for (`$attempt = 1; `$attempt -le 2; `$attempt++) {
+            & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
+            Start-Sleep -Seconds 4
+            & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
+            & sc.exe start `$TUNNEL_SVC 2>`$null | Out-Null
+            `$waited = 0
+            while (`$waited -lt 30 -and -not (Test-TunnelRunning)) {
+                Start-Sleep -Seconds 3; `$waited += 3
+            }
+            if (Test-TunnelRunning) { return `$true }
+            Log "TunnelReinstall: attempt `$attempt failed (waited `${waited}s)"
+        }
+        return `$false
     } finally {
         if (`$mux) { try { `$mux.ReleaseMutex() } catch {} }
     }
+}
+
+function Invoke-EmergencyUnbrick {
+    Log "EMERGENCY UNBRICK: removing blocks + aggressive tunnel retry"
+    Disable-Block
+    Clear-DnsClientCache -EA SilentlyContinue
+    `$up = Try-ReinstallTunnel
+    if (`$up -and (Test-SafeToOpen)) {
+        Log "EMERGENCY UNBRICK: tunnel + internet OK"
+        return `$true
+    }
+    if (Test-Internet) {
+        Log "EMERGENCY UNBRICK: direct internet open (tunnel may still be down)"
+        return `$true
+    }
+    Log "EMERGENCY UNBRICK: still unhealthy - run C:\WireGuard\kurtar.bat"
+    return `$false
 }
 
 function Remove-OtherMonitorProcs {
@@ -1093,7 +1130,7 @@ try {
     exit 1
 }
 
-Log "=== Monitor started (v11.4) ==="
+Log "=== Monitor started (v11.5) ==="
 
 if (Test-InstallInProgress) {
     Disable-Block
@@ -1222,7 +1259,11 @@ while (`$true) {
         }
         if (-not `$success) {
             Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - holding block 60s then retrying"
-            if (`$totalAttempts -ge 15 -and (`$totalAttempts % 15) -eq 0) {
+            if (`$totalAttempts -ge 10 -and (`$totalAttempts % 10) -eq 0) {
+                if (Invoke-EmergencyUnbrick) {
+                    `$state = 'open'; `$wasOpen = `$true; `$success = `$true; break
+                }
+            } elseif (`$totalAttempts -ge 15 -and (`$totalAttempts % 15) -eq 0) {
                 Log "STUCK: run C:\WireGuard\kurtar.bat for emergency restore"
             }
             Enable-Block; `$state = 'blocked'
@@ -1481,20 +1522,30 @@ function Test-MainMonitorActive {
 function Try-ReinstallTunnel {
     $mux = $null
     try {
+        if (Test-TunnelRunning) { return $true }
         $mux = New-Object System.Threading.Mutex($false, 'Global\WGTunnelInstallMutex')
         if (-not (Wait-NamedMutex $mux 90000)) {
             Log "TunnelReinstall: mutex timeout"
             return (Test-TunnelRunning)
         }
+        if (Test-TunnelRunning) { return $true }
         Get-Process -Name "wireguard" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
         $wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
         if ($wgSvcPid -and $wgSvcPid -gt 0) { Stop-Process -Id $wgSvcPid -Force -EA SilentlyContinue }
         Start-Sleep -Seconds 2
-        & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
-        Start-Sleep -Seconds 4
-        & $WG_EXE /installtunnelservice $CONFIG 2>$null | Out-Null
-        Start-Sleep -Seconds 12
-        return (Test-TunnelRunning)
+        for ($attempt = 1; $attempt -le 2; $attempt++) {
+            & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
+            Start-Sleep -Seconds 4
+            & $WG_EXE /installtunnelservice $CONFIG 2>$null | Out-Null
+            & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
+            $waited = 0
+            while ($waited -lt 30 -and -not (Test-TunnelRunning)) {
+                Start-Sleep -Seconds 3; $waited += 3
+            }
+            if (Test-TunnelRunning) { return $true }
+            Log "TunnelReinstall: attempt $attempt failed (waited ${waited}s)"
+        }
+        return $false
     } finally {
         if ($mux) { try { $mux.ReleaseMutex() } catch {} }
     }
@@ -1688,7 +1739,7 @@ OK "wmi-repair.ps1 written"
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
 @'
-# WGKillSwitchSvc wrapper v11.4 (auto-generated by install.ps1)
+# WGKillSwitchSvc wrapper v11.5 (auto-generated by install.ps1)
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
@@ -1746,7 +1797,7 @@ function TriggerRepair([string]$reason) {
     Log $reason
     if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 }
-Log "WGKillSwitchSvc started (v11.4)"
+Log "WGKillSwitchSvc started (v11.5)"
 Start-Sleep -Seconds 15
 TriggerRepair "Initial repair triggered"
 while ($true) {
@@ -1790,7 +1841,7 @@ $atNssm = $NSSM
 $atSvcName = $WG_SVC_NAME
 $atTunnelSvc = $TUNNEL_SVC
 @"
-# WG Anti-Tamper Guard v11.4 (auto-generated by install.ps1)
+# WG Anti-Tamper Guard v11.5 (auto-generated by install.ps1)
 # Silently restores deleted/disabled protection layers from guard vault + registry.
 param([switch]`$Quick, [switch]`$NoChainRepair)
 `$ErrorActionPreference = 'SilentlyContinue'
@@ -2173,7 +2224,7 @@ Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -notin @('killswitch.l
 OK "ACL set + files hidden"
 
 New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
-Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.4"                              -Force
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.5"                              -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
 $taskXml = Export-ScheduledTask -TaskName $TASK_MONITOR
@@ -2442,11 +2493,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v11.4 completed"
+Log "install.ps1 v11.5 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v11.4)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v11.5)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow

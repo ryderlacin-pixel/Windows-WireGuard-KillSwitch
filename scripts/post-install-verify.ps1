@@ -7,10 +7,10 @@ function Assert([bool]$cond, [string]$msg) {
     else { Write-Host "  [OK] $msg" -ForegroundColor Green }
 }
 
-Write-Host '=== POST-INSTALL VERIFICATION (v11.2) ===' -ForegroundColor Cyan
+Write-Host '=== POST-INSTALL VERIFICATION (v11.4) ===' -ForegroundColor Cyan
 
 $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
-Assert ($reg.Version -ge '11.0') "Registry version 11.0+ (got $($reg.Version))"
+Assert ($reg.Version -ge '11.4') "Registry version 11.4+ (got $($reg.Version))"
 
 foreach ($f in @('monitor.ps1','repair.ps1','service-monitor.ps1','wmi-repair.ps1','wgcf-profile.conf')) {
     Assert (Test-Path "C:\WireGuard\$f") "File exists: $f"
@@ -125,6 +125,12 @@ $repRaw = Get-Content 'C:\WireGuard\repair.ps1' -Raw -EA SilentlyContinue
 Assert ($repRaw -match 'Repair-ConfigIntegrity') 'repair.ps1 has Repair-ConfigIntegrity'
 Assert ($repRaw -match 'Repair-EssentialFirewall') 'repair.ps1 has Repair-EssentialFirewall'
 Assert ($repRaw -match 'Test-NetworkChanged') 'repair.ps1 has Test-NetworkChanged'
+Assert ($repRaw -match 'Test-MainMonitorActive') 'repair.ps1 defers to active monitor'
+Assert ($repRaw -match 'deferring reinstall') 'repair.ps1 has deferral guard'
+Assert ($repRaw -match 'Try-ReinstallTunnel') 'repair.ps1 uses mutex reinstall'
+
+$svcRaw = Get-Content 'C:\WireGuard\service-monitor.ps1' -Raw -EA SilentlyContinue
+Assert ($svcRaw -match 'tunnel recovery delegated') 'service-monitor delegates tunnel recovery'
 
 $wmiRaw = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
 Assert ($wmiRaw -match 'wmi-cooldown') 'wmi-repair.ps1 has WMI cooldown'
@@ -134,6 +140,7 @@ $qc = & sc.exe qc 'WireGuardTunnel$wgcf-profile' 2>$null | Out-String
 Assert ($qc -match 'DELAYED') 'Tunnel service delayed-auto-start configured'
 
 Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat rescue script present'
+Assert (Test-Path 'C:\WireGuard\kurtar2.ps1') 'kurtar2.ps1 rescue script present'
 Assert (-not (Test-Path 'C:\WireGuard\install.inprogress')) 'install lock cleared after install'
 
 $cfg = Get-Content 'C:\WireGuard\wgcf-profile.conf' -Raw -EA SilentlyContinue

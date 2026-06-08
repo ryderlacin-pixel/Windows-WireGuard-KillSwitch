@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# WireGuard Kill Switch - ULTIMATE LIVE STRESS TEST (v11.0 gate)
+# WireGuard Kill Switch - ULTIMATE LIVE STRESS TEST (v11.4 gate)
 # Simulates: process kill, tunnel drop, firewall tamper, network/modem change, reinstall, layer recovery
 param(
     [int]$PassCount = 1,
@@ -79,7 +79,7 @@ function Wait-Block([int]$sec = 30) {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  ULTIMATE STRESS TEST (v11.0)" -ForegroundColor Cyan
+Write-Host "  ULTIMATE STRESS TEST (v11.4)" -ForegroundColor Cyan
 Write-Host "  Passes: $PassCount  Quick: $Quick" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
@@ -116,6 +116,8 @@ for ($passNum = 1; $passNum -le $PassCount; $passNum++) {
     Start-Sleep 8
     if (-not (Test-TunnelRunning)) { sc.exe start $TUNNEL_SVC 2>$null | Out-Null; Start-Sleep 5 }
     Assert (Wait-Healthy 60) "Recovery: tunnel restored and healthy"
+
+    # [3b] Race test is OPT-IN ONLY (run race-recovery-test.ps1 -ConfirmDisruptsInternet manually)
 
     # [4] Firewall tamper — delete block rule
     Write-Host '[stress] Delete KS-Block-WiFi-Out...' -ForegroundColor Gray
