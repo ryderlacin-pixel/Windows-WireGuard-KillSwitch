@@ -8,15 +8,17 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v11.0** is the current production release (self-repair, network-change detect, WMI cooldown, ultimate stress-tested).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v11.2** is the current production release (ultimate stress-tested, monitor singleton, post-reboot auto-verify).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v11.0](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v11.0)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v11.2](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v11.2)**.
 
 **Security check (after install):** run `scripts\security-audit.ps1` as Administrator — IP leak, DNS leak, IPv6, kill switch simulation.
+
+**After reboot:** `WG-RebootVerify` runs automatically ~5 minutes after boot; results in `C:\WireGuard\reboot-verify.log` and registry `RebootVerifyLastResult`.
 
 ---
 
@@ -26,7 +28,7 @@ Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened ki
 flowchart TB
   install["install.ps1"] --> tunnel["WireGuard Tunnel"]
   install --> firewall["Firewall Rules KS-*"]
-  install --> layers["8 Recovery Layers"]
+  install --> layers["9 Recovery Layers"]
   layers --> monitor["monitor.ps1"]
   layers --> repair["repair.ps1"]
   layers --> tasks["WG-KillSwitch + WG-RepairTask"]
@@ -43,7 +45,7 @@ flowchart TB
 1. **Downloads & installs WireGuard** silently (if not already installed)
 2. **Downloads wgcf** and generates an **anonymous** Cloudflare WARP account — no email, no login
 3. **Applies a kill switch** via Windows Firewall that blocks all internet traffic unless the VPN tunnel is active
-4. **Installs 8 redundant recovery layers** so the VPN restarts automatically after crashes or reboots
+4. **Installs 9 redundant recovery layers** so the VPN restarts automatically after crashes or reboots (including post-reboot audit)
 
 No personal data is stored anywhere. The WARP registration is completely anonymous.
 
@@ -59,7 +61,7 @@ In that environment, the combination of **Cloudflare WARP + this kill switch** w
 |---------|---------------------------|
 | **State-level blocks** | WARP routes traffic through Cloudflare's network, bypassing most common ISP/DNS blocks for everyday browsing |
 | **VPN drops** | Kill switch blocks all outbound traffic immediately — no accidental leak onto a filtered or unprotected connection |
-| **Reboot / crash** | 8 recovery layers restart the tunnel automatically; block stays active until the tunnel is confirmed running |
+| **Reboot / crash** | 9 recovery layers restart the tunnel automatically; `WG-RebootVerify` audits health ~5 min after boot |
 | **DNS leaks** | Firewall allows DNS only to `1.1.1.1` / `1.0.0.1`; all other DNS outbound is blocked |
 
 Validated on **Windows 11** with production use across multiple reboots (v10.0+). Not a lab test — real machine, real network, real blocks.
@@ -261,6 +263,25 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ---
 
 ## Changelog
+
+### v11.2
+- **Post-reboot auto-verify:** `WG-RebootVerify` scheduled task runs `post-reboot-verify.ps1` 5 min after boot
+- Runs `post-install-verify.ps1` + `security-audit.ps1`; logs to `C:\WireGuard\reboot-verify.log`
+- Registry: `RebootVerifyLastResult`, `ScriptsPath`, `RebootVerifyPath`
+
+### v11.1
+- **Monitor singleton fix:** single launcher in install/repair (no `schtasks` + direct double-start)
+- `Remove-OtherMonitorProcs` + periodic dedupe in monitor loop; stale `monitor.pid` cleanup
+- Mutex wait 5s; firewall tamper re-applies block every unhealthy cycle
+
+### v11.0
+- Ultimate hardening: `Repair-ConfigIntegrity`, `Repair-EssentialFirewall`, `Test-NetworkChanged`
+- `Test-DelayedAutoStart`, WMI 45s cooldown, `scripts/ultimate-stress-test.ps1` (19/19 live gate)
+- Security audit 32/32; repair early `Sync-KillSwitchState`
+
+### v10.9
+- IPv6 strip from WARP config; WMI subscription fix; monitor dedupe; 2s tunnel-down poll
+- Install-safe mode (`install.inprogress` + `kurtar.bat`); security audit clean
 
 ### v10.7
 - **Critical:** Fixed PowerShell parse error (`Get-MainMonitorProcs` alias) — v10.6 `install.ps1` could not compile on PS 5.1

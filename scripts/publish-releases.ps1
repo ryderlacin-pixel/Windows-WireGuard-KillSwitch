@@ -50,8 +50,7 @@ $headers = @{
 function ConvertTo-JsonUtf8([hashtable]$Obj) {
     $ordered = [ordered]@{}
     foreach ($key in $Obj.Keys) { $ordered[$key] = $Obj[$key] }
-    $json = $ordered | ConvertTo-Json -Compress -Depth 10
-    [System.Text.Encoding]::UTF8.GetBytes($json)
+    return ($ordered | ConvertTo-Json -Compress -Depth 10)
 }
 
 function Invoke-GH($Method, $Uri, $Body) {
@@ -77,6 +76,10 @@ $releases = @{
     "v10.5" = @{ name = "v10.5 - AbandonedMutexException fix" }
     "v10.6" = @{ name = "v10.6 - Zombie-tunnel leak prevention" }
     "v10.7" = @{ name = "v10.7 - 9.5 quality gate (layer sync + parse fix)" }
+    "v10.9" = @{ name = "v10.9 - Security hardening (IPv6, WMI, audit clean)" }
+    "v11.0" = @{ name = "v11.0 - Ultimate hardening + stress gate" }
+    "v11.1" = @{ name = "v11.1 - Monitor singleton fix" }
+    "v11.2" = @{ name = "v11.2 - Post-reboot auto-verify (production)" }
 }
 
 function Get-ReleaseBody($tag) {
@@ -115,7 +118,7 @@ function Publish-Release($tag, $name, $body) {
 }
 
 Write-Host "=== Publish GitHub Releases ===" -ForegroundColor Cyan
-$toPublish = if ($Only) { @($Only) } else { @("v10.0", "v10.1", "v10.4", "v10.5", "v10.6", "v10.7") }
+$toPublish = if ($Only) { @($Only) } else { @("v10.0", "v10.1", "v10.4", "v10.5", "v10.6", "v10.7", "v10.9", "v11.0", "v11.1", "v11.2") }
 
 foreach ($tag in $toPublish) {
     if (-not $releases.ContainsKey($tag)) {
