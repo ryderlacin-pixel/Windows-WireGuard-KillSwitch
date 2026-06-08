@@ -141,7 +141,7 @@ When tunnel is **running** and internet test passes, Wi-Fi/Ethernet block rules 
 | Log file | `C:\WireGuard\killswitch.log` (rotated at 500 lines) |
 | Uninstall | Re-run installer after manual tunnel removal, or delete tasks/service/rules manually |
 
-**Threat model:** Protect against **accidental VPN leak** when tunnel drops — not against a malicious local admin who disables firewall/tasks intentionally.
+**Threat model:** Primary goal — **accidental VPN leak** when tunnel drops. **v11.3+** adds anti-tamper guard (silent restore of deleted tasks/scripts/firewall/WMI/service from `C:\ProgramData\WGKillSwitchGuard` + registry). This raises the bar against deliberate tampering but **cannot** fully stop a determined local admin (Windows admin = root).
 
 ---
 

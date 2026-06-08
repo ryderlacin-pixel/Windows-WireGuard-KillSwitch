@@ -9,7 +9,7 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v11.2** is the current production release (ultimate stress-tested, monitor singleton, post-reboot auto-verify).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v11.3** is the current production release (anti-tamper guard, stress-tested, monitor singleton, post-reboot auto-verify).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
@@ -266,6 +266,12 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ---
 
 ## Changelog
+
+### v11.3
+- **Anti-tamper guard:** `anti-tamper.ps1` + hidden vault `C:\ProgramData\WGKillSwitchGuard`
+- Detects deleted/disabled tasks, scripts, firewall, WMI, NSSM service, GPO, Run key, startup shortcut
+- Silent restore from registry backups + guard copies; logs `[TAMPER]` + Windows Event Log
+- Runs from repair (every 2min), monitor (every 60s quick scan), NSSM service loop
 
 ### v11.2
 - **GitHub Actions CI:** `.github/workflows/ci.yml` — `scripts/ci.ps1` offline gate on every push/PR
