@@ -163,8 +163,8 @@ function Write-DnscryptGuardPs1 {
 `$ErrorActionPreference = 'SilentlyContinue'
 `$LOG = 'C:\WireGuard\killswitch.log'
 `$DNSCRYPT_DIR = 'C:\WireGuard\dnscrypt-proxy'
-`$DNSCRYPT_EXE = '`$DNSCRYPT_DIR\dnscrypt-proxy.exe'
-`$DNSCRYPT_CONF = '`$DNSCRYPT_DIR\dnscrypt-proxy.toml'
+`$DNSCRYPT_EXE = Join-Path `$DNSCRYPT_DIR 'dnscrypt-proxy.exe'
+`$DNSCRYPT_CONF = Join-Path `$DNSCRYPT_DIR 'dnscrypt-proxy.toml'
 `$DNSCRYPT_SVC = 'WG-DnscryptProxy'
 `$CONFIG = 'C:\WireGuard\wgcf-profile.conf'
 function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [DNSCRYPT] `$m" -Encoding UTF8 } catch {} }
@@ -357,30 +357,50 @@ function Patch-RepairV14GuardChain {
 }
 
 function Invoke-V14DnsLeakStack {
-    Write-AllV14GuardScripts
-    if (Install-DnscryptProxy) {
-        Install-DnscryptService | Out-Null
-        Set-WireGuardDnsLocalhost | Out-Null
-        & $script:DNSCRYPT_GUARD_PS1 2>$null
+    try {
+        Write-AllV14GuardScripts
+        if (Install-DnscryptProxy) {
+            Install-DnscryptService | Out-Null
+            Set-WireGuardDnsLocalhost | Out-Null
+            if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+                Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
+            } elseif (Test-Path $script:DNSCRYPT_GUARD_PS1) {
+                & $script:DNSCRYPT_GUARD_PS1 2>$null
+            }
+        }
+        Patch-RepairV14GuardChain | Out-Null
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V14DnsLeak' '1' -Force -EA SilentlyContinue
+    } catch {
+        if (Get-Command WARN -EA SilentlyContinue) { WARN "v14 DNS leak stack: $_" }
     }
-    Patch-RepairV14GuardChain | Out-Null
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V14DnsLeak' '1' -Force -EA SilentlyContinue
 }
 
 function Invoke-V14TorStack {
-    Write-TorHardeningGuardPs1
-    Write-TorConnectivityMonitorPs1
-    Install-TorBrowserHint | Out-Null
-    if (Test-Path $script:TOR_GUARD_PS1) { & $script:TOR_GUARD_PS1 }
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V14Tor' '1' -Force -EA SilentlyContinue
+    try {
+        Write-TorHardeningGuardPs1
+        Write-TorConnectivityMonitorPs1
+        Install-TorBrowserHint | Out-Null
+        if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+            Invoke-GuardScriptSafe -Path $script:TOR_GUARD_PS1 -Label 'tor-hardening-guard'
+        } elseif (Test-Path $script:TOR_GUARD_PS1) { & $script:TOR_GUARD_PS1 2>$null }
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V14Tor' '1' -Force -EA SilentlyContinue
+    } catch {
+        if (Get-Command WARN -EA SilentlyContinue) { WARN "v14 Tor stack: $_" }
+    }
 }
 
 function Invoke-V14FullPrivacyStack {
-    Invoke-V14DnsLeakStack
-    Invoke-V14TorStack
-    Write-LeakSentinelPs1
-    if (Test-Path $script:LEAK_SENTINEL_PS1) { & $script:LEAK_SENTINEL_PS1 }
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V14Enabled' '1' -Force -EA SilentlyContinue
+    try {
+        Invoke-V14DnsLeakStack
+        Invoke-V14TorStack
+        Write-LeakSentinelPs1
+        if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+            Invoke-GuardScriptSafe -Path $script:LEAK_SENTINEL_PS1 -Label 'leak-sentinel'
+        } elseif (Test-Path $script:LEAK_SENTINEL_PS1) { & $script:LEAK_SENTINEL_PS1 2>$null }
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V14Enabled' '1' -Force -EA SilentlyContinue
+    } catch {
+        if (Get-Command WARN -EA SilentlyContinue) { WARN "v14 full privacy stack: $_" }
+    }
 }
 
 function Test-V14DnsLeakHealthy {

@@ -211,6 +211,37 @@ function Clear-InstallLock {
     Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
 }
 
+function Invoke-GuardScriptSafe {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Label = 'guard'
+    )
+    if (-not (Test-Path $Path)) { return $false }
+    try {
+        & $Path 2>$null
+        return $true
+    } catch {
+        if (Get-Command WARN -ErrorAction SilentlyContinue) { WARN "$Label failed: $_" }
+        elseif (Get-Command Write-Info -ErrorAction SilentlyContinue) { Write-Info "$Label failed: $_" }
+        return $false
+    }
+}
+
+function Ensure-DnscryptTomlFile {
+    param([Parameter(Mandatory)][scriptblock]$GetContent)
+    $dir = if ($script:DNSCRYPT_DIR) { $script:DNSCRYPT_DIR } elseif ($DNSCRYPT_DIR) { $DNSCRYPT_DIR } else { 'C:\WireGuard\dnscrypt-proxy' }
+    $conf = if ($script:DNSCRYPT_CONF) { $script:DNSCRYPT_CONF } elseif ($DNSCRYPT_CONF) { $DNSCRYPT_CONF } else { Join-Path $dir 'dnscrypt-proxy.toml' }
+    try {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $enc = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($conf, (& $GetContent), $enc)
+        return $true
+    } catch {
+        if (Get-Command WARN -ErrorAction SilentlyContinue) { WARN "dnscrypt toml write failed: $_" }
+        return $false
+    }
+}
+
 function Remove-InstallBlocks {
     foreach ($r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
         if (Get-Command Invoke-SafeNetsh -ErrorAction SilentlyContinue) {

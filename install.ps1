@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.2)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.3)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
@@ -34,6 +34,7 @@ param(
 $ErrorActionPreference = "Continue"
 $script:InstallDryRun = $DryRun.IsPresent
 $script:EnableFailsafe = $EnableFailsafe
+Set-Location -LiteralPath $PSScriptRoot
 
 $LibRoot = Join-Path $PSScriptRoot 'lib'
 $LibModules = @(

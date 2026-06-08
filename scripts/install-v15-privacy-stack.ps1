@@ -128,8 +128,8 @@ function Write-DnscryptGuardPs1V15 {
 `$ErrorActionPreference = 'SilentlyContinue'
 `$LOG = 'C:\WireGuard\killswitch.log'
 `$DNSCRYPT_DIR = 'C:\WireGuard\dnscrypt-proxy'
-`$DNSCRYPT_EXE = '`$DNSCRYPT_DIR\dnscrypt-proxy.exe'
-`$DNSCRYPT_CONF = '`$DNSCRYPT_DIR\dnscrypt-proxy.toml'
+`$DNSCRYPT_EXE = Join-Path `$DNSCRYPT_DIR 'dnscrypt-proxy.exe'
+`$DNSCRYPT_CONF = Join-Path `$DNSCRYPT_DIR 'dnscrypt-proxy.toml'
 `$DNSCRYPT_SVC = 'WG-DnscryptProxy'
 `$CONFIG = 'C:\WireGuard\wgcf-profile.conf'
 function Log(`$m) { try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [DNSCRYPT] `$m" -Encoding UTF8 } catch {} }
@@ -312,35 +312,53 @@ function Patch-RepairV15GuardChain {
 }
 
 function Invoke-V15StrongPrivacyStack {
-    if (Get-Command Invoke-V14FullPrivacyStack -EA SilentlyContinue) {
-        Invoke-V14FullPrivacyStack
-    } elseif (Get-Command Invoke-V14DnsLeakStack -EA SilentlyContinue) {
-        Invoke-V14DnsLeakStack
-        if (Get-Command Invoke-V14TorStack -EA SilentlyContinue) { Invoke-V14TorStack }
+    try {
+        if (Get-Command Invoke-V14FullPrivacyStack -EA SilentlyContinue) {
+            Invoke-V14FullPrivacyStack
+        } elseif (Get-Command Invoke-V14DnsLeakStack -EA SilentlyContinue) {
+            Invoke-V14DnsLeakStack
+            if (Get-Command Invoke-V14TorStack -EA SilentlyContinue) { Invoke-V14TorStack }
+        }
+        Write-DnscryptGuardPs1V15
+        Write-DnsLockdownGuardPs1
+        Write-NetworkPrivacyGuardPs1
+        Write-TorHardeningGuardPs1V15
+        Write-LeakSentinelPs1V15
+        if (Get-Command Ensure-DnscryptTomlFile -EA SilentlyContinue) {
+            Ensure-DnscryptTomlFile { Get-DnscryptTomlContentV15 } | Out-Null
+        } else {
+            New-Item -ItemType Directory -Path $script:DNSCRYPT_DIR -Force | Out-Null
+            $enc = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($script:DNSCRYPT_CONF, (Get-DnscryptTomlContentV15), $enc)
+        }
+        Install-DnscryptExeFirewallRule | Out-Null
+        Install-V15WifiRandomMac | Out-Null
+        Install-SensitiveModeLauncher | Out-Null
+        if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+            Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
+            Start-Sleep -Seconds 2
+            foreach ($g in @(
+                $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
+                $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
+            )) {
+                Invoke-GuardScriptSafe -Path $g -Label (Split-Path $g -Leaf)
+            }
+        } else {
+            if (Test-Path $script:DNSCRYPT_GUARD_PS1) { & $script:DNSCRYPT_GUARD_PS1 2>$null }
+            Start-Sleep -Seconds 2
+            foreach ($g in @(
+                $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
+                $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
+            )) {
+                if (Test-Path $g) { & $g 2>$null }
+            }
+        }
+        Patch-RepairV15GuardChain | Out-Null
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V15StrongPrivacy' '1' -Force -EA SilentlyContinue
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'PrivacyTier' 'STRONG' -Force -EA SilentlyContinue
+    } catch {
+        if (Get-Command WARN -EA SilentlyContinue) { WARN "v15 strong privacy stack: $_" }
     }
-    Write-DnscryptGuardPs1V15
-    Write-DnsLockdownGuardPs1
-    Write-NetworkPrivacyGuardPs1
-    Write-TorHardeningGuardPs1V15
-    Write-LeakSentinelPs1V15
-    if (Test-Path $script:DNSCRYPT_CONF) {
-        $enc = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($script:DNSCRYPT_CONF, (Get-DnscryptTomlContentV15), $enc)
-    }
-    Install-DnscryptExeFirewallRule | Out-Null
-    Install-V15WifiRandomMac | Out-Null
-    Install-SensitiveModeLauncher | Out-Null
-    if (Test-Path $script:DNSCRYPT_GUARD_PS1) { & $script:DNSCRYPT_GUARD_PS1 2>$null }
-    Start-Sleep -Seconds 2
-    foreach ($g in @(
-        $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
-        $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
-    )) {
-        if (Test-Path $g) { & $g 2>$null }
-    }
-    Patch-RepairV15GuardChain | Out-Null
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V15StrongPrivacy' '1' -Force -EA SilentlyContinue
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'PrivacyTier' 'STRONG' -Force -EA SilentlyContinue
 }
 
 function Test-V15DnsLockdownHealthy {

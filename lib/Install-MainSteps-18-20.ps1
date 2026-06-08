@@ -19,7 +19,7 @@ try {
 # ================================================================
 Write-Step "STEP 18b - PRIVACY HARDENING"
 # ================================================================
-Install-PrivacyHardening
+try { Install-PrivacyHardening } catch { WARN "Privacy hardening failed: $_" }
 if (Test-Path $PRIVACY_GUARD_PS1) { OK "privacy-hardening-guard.ps1: deployed" } else { WARN "privacy-hardening-guard.ps1: missing" }
 if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: deployed" } else { WARN "webrtc-leak-guard.ps1: missing" }
 if (Test-ScriptIntegrityVault) { OK "Script integrity vault: seeded" } else { WARN "Script integrity vault: not verified" }
@@ -28,7 +28,7 @@ if (Test-ScriptIntegrityVault) { OK "Script integrity vault: seeded" } else { WA
 Write-Step "STEP 18c - V14 DNS LEAK STACK (dnscrypt-proxy)"
 # ================================================================
 if (Get-Command Invoke-V14DnsLeakStack -EA SilentlyContinue) {
-    Invoke-V14DnsLeakStack
+    try { Invoke-V14DnsLeakStack } catch { WARN "v14 DNS leak stack failed: $_" }
     if (Get-Command Test-V14DnsLeakHealthy -EA SilentlyContinue) {
         if (Test-V14DnsLeakHealthy) { OK "dnscrypt-proxy: healthy" }
         else { WARN "dnscrypt-proxy: service not healthy yet (guard will retry)" }
@@ -39,7 +39,7 @@ if (Get-Command Invoke-V14DnsLeakStack -EA SilentlyContinue) {
 Write-Step "STEP 18d - V14 TOR HARDENING"
 # ================================================================
 if (Get-Command Invoke-V14TorStack -EA SilentlyContinue) {
-    Invoke-V14TorStack
+    try { Invoke-V14TorStack } catch { WARN "v14 Tor stack failed: $_" }
     if (Get-Command Test-V14TorPresent -EA SilentlyContinue) {
         if (Test-V14TorPresent) { OK "Tor Browser: present" }
         else { WARN "Tor Browser: not installed (manual install from torproject.org)" }
@@ -50,7 +50,9 @@ if (Get-Command Invoke-V14TorStack -EA SilentlyContinue) {
 Write-Step "STEP 18e - V14 LEAK SENTINEL (read-only probe)"
 # ================================================================
 if (Test-Path $LEAK_SENTINEL_PS1) {
-    & $LEAK_SENTINEL_PS1 2>$null
+    if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+        Invoke-GuardScriptSafe -Path $LEAK_SENTINEL_PS1 -Label 'leak-sentinel' | Out-Null
+    } else { & $LEAK_SENTINEL_PS1 2>$null }
     $leakSt = (Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name LeakState -EA SilentlyContinue).LeakState
     if ($leakSt -eq 'HEALTHY') { OK "leak-sentinel: HEALTHY" }
     elseif ($leakSt) { WARN "leak-sentinel: $leakSt" }
@@ -61,7 +63,7 @@ if (Test-Path $LEAK_SENTINEL_PS1) {
 Write-Step "STEP 18f - V15 STRONG PRIVACY STACK"
 # ================================================================
 if (Get-Command Invoke-V15StrongPrivacyStack -EA SilentlyContinue) {
-    Invoke-V15StrongPrivacyStack
+    try { Invoke-V15StrongPrivacyStack } catch { WARN "v15 strong privacy stack failed: $_" }
     if (Get-Command Test-V15DnsLockdownHealthy -EA SilentlyContinue) {
         if (Test-V15DnsLockdownHealthy) { OK "System DNS lock: all adapters 127.0.0.1" }
         else { WARN "System DNS lock: incomplete (guard will retry)" }
