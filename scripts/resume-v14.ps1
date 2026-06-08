@@ -27,8 +27,8 @@ if (Test-Path $NSSM) {
     else { WARN 'WGKillSwitchSvc not RUNNING yet' }
     $dns = & sc.exe query WG-DnscryptProxy 2>&1 | Out-String
     if ($dns -match 'RUNNING') { OK 'WG-DnscryptProxy RUNNING' }
-    else { WARN 'WG-DnscryptProxy not RUNNING — run -DnsLeakUpgradeOnly' }
-} else { WARN 'nssm.exe missing — service start skipped' }
+    else { WARN 'WG-DnscryptProxy not RUNNING - run -DnsLeakUpgradeOnly' }
+} else { WARN 'nssm.exe missing - service start skipped' }
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installPs1 -FullPrivacyUpgrade -NoPause | Out-Host
 OK 'FullPrivacyUpgrade completed'

@@ -32,7 +32,7 @@ if (Test-Path $NSSM) {
     $st = & sc.exe query $WG_SVC 2>&1 | Out-String
     if ($st -match 'RUNNING') { OK 'WGKillSwitchSvc RUNNING' }
     else { WARN 'WGKillSwitchSvc not RUNNING yet (repair layers still active)' }
-} else { WARN 'nssm.exe missing — service start skipped' }
+} else { WARN 'nssm.exe missing - service start skipped' }
 
 # 4) Privacy + integrity refresh (no full install)
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installPs1 -PrivacyUpgradeOnly | Out-Host

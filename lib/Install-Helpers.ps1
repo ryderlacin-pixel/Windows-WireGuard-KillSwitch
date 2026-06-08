@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 â€” Install-Helpers.ps1 (v15.1 modular split)
+# Dot-sourced from install.ps1 - Install-Helpers.ps1 (v15.1 modular split)
 #Requires -Version 5.1
 # -- Helpers --
 function Write-Step([string]$Title) {
@@ -256,6 +256,12 @@ function Invoke-DeferredPrivacyGuards {
         WARN 'Privacy guards deferred: dnscrypt not listening on 127.0.0.1:53 (repair will retry)'
         return
     }
+    if (Get-Command Test-SafeToOpen -ErrorAction SilentlyContinue) {
+        if (-not (Test-SafeToOpen)) {
+            WARN 'Privacy guards deferred: tunnel+internet not healthy yet (repair will retry)'
+            return
+        }
+    }
     if (Get-Command Unlock-WireGuardConfigForWrite -ErrorAction SilentlyContinue) {
         Unlock-WireGuardConfigForWrite
     } elseif (Test-Path $CONFIG) {
@@ -314,7 +320,28 @@ function Remove-InstallBlocks {
     }
 }
 
+function Backup-TunnelConfig {
+    if (-not (Test-Path $CONFIG)) { return $false }
+    Copy-Item $CONFIG "$CONFIG.bak" -Force
+    return $true
+}
+
+function Restore-TunnelConfigIfMissing {
+    if (Test-Path $CONFIG) { return $true }
+    if (Test-Path "$CONFIG.bak") {
+        Copy-Item "$CONFIG.bak" $CONFIG -Force
+        return $true
+    }
+    $guardCfg = Join-Path $GUARD_DIR 'wgcf-profile.conf'
+    if (Test-Path $guardCfg) {
+        Copy-Item $guardCfg $CONFIG -Force
+        return $true
+    }
+    return $false
+}
+
 function Restart-TunnelWithConfig {
+    Restore-TunnelConfigIfMissing | Out-Null
     if (-not (Test-Path $CONFIG)) { return $false }
     if (Test-TunnelRunning) {
         & sc.exe stop $TUNNEL_SVC 2>$null | Out-Null
@@ -324,16 +351,20 @@ function Restart-TunnelWithConfig {
         while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 2; $waited += 2 }
         return (Test-TunnelRunning)
     }
-    $wgJob = Start-Job -ScriptBlock {
-        param($exe, $tn, $cfg, $svc)
-        & $exe /uninstalltunnelservice $tn 2>$null | Out-Null
-        Start-Sleep 2
-        & $exe /installtunnelservice $cfg 2>&1 | Out-Null
-        & sc.exe start $svc 2>$null | Out-Null
-    } -ArgumentList $WG_EXE, $TUNNEL_NAME, $CONFIG, $TUNNEL_SVC
-    $null = Wait-Job $wgJob -Timeout 45
-    if ($wgJob.State -eq 'Running') { Stop-Job $wgJob -EA SilentlyContinue; Remove-Job $wgJob -Force; return $false }
-    Remove-Job $wgJob -Force
+    $svcExists = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -notmatch 'does not exist')
+    if ($svcExists) {
+        & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
+        $waited = 0
+        while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 2; $waited += 2 }
+        if (Test-TunnelRunning) { return $true }
+    }
+    Backup-TunnelConfig | Out-Null
+    & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
+    Start-Sleep 2
+    Restore-TunnelConfigIfMissing | Out-Null
+    if (-not (Test-Path $CONFIG)) { return $false }
+    & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
+    & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
     $waited = 0
     while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 2; $waited += 2 }
     return (Test-TunnelRunning)
@@ -344,11 +375,28 @@ function Ensure-TunnelForInstall {
         OK "Tunnel already RUNNING - kept alive during upgrade"
         return $true
     }
+    Restore-TunnelConfigIfMissing | Out-Null
     if (-not (Test-Path $CONFIG)) { WARN "Config missing - cannot install tunnel"; return $false }
     Write-Info "Tunnel down - installing service..."
+    $svcExists = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -notmatch 'does not exist')
+    if ($svcExists) {
+        & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
+        $waited = 0
+        while ($waited -lt 45 -and -not (Test-TunnelServiceRunning)) { Start-Sleep 3; $waited += 3 }
+        if (Test-TunnelServiceRunning) {
+            OK "Tunnel RUNNING (soft start, waited ${waited}s)"
+            return $true
+        }
+    }
     for ($attempt = 1; $attempt -le 2; $attempt++) {
+        Backup-TunnelConfig | Out-Null
         & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
         Start-Sleep 2
+        Restore-TunnelConfigIfMissing | Out-Null
+        if (-not (Test-Path $CONFIG)) {
+            WARN "Tunnel config lost after uninstall - attempt $attempt"
+            continue
+        }
         & $WG_EXE /installtunnelservice $CONFIG 2>&1 | Out-Null
         & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
         $waited = 0

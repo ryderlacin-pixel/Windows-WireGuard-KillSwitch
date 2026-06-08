@@ -1,5 +1,6 @@
 #Requires -RunAsAdministrator
-# WG Kill Switch — one-click emergency network recovery (v15.2)
+# WG Kill Switch - one-click emergency network recovery (v15.2)
+param([switch]$NoPause)
 $ErrorActionPreference = 'Continue'
 $log = 'C:\WireGuard\emergency-reset.log'
 
@@ -62,7 +63,7 @@ try {
     Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
 } catch {}
 
-Write-Log '=== EMERGENCY RESET COMPLETE — reboot recommended ==='
+Write-Log '=== EMERGENCY RESET COMPLETE - reboot recommended ==='
 Write-Host ''
 Write-Host 'Reboot your PC to fully restore the network stack.' -ForegroundColor Yellow
-pause
+if (-not $NoPause) { pause }

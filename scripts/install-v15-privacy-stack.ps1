@@ -76,6 +76,25 @@ if (`$st -notmatch 'RUNNING' -or `$net -notmatch '127\.0\.0\.1:53\s+.*LISTENING'
     Set-ItemProperty `$REG 'DnsLockdownState' 'DEFERRED' -Force -EA SilentlyContinue
     exit 0
 }
+`$tcp = `$null
+try {
+    `$tcp = New-Object System.Net.Sockets.TcpClient
+    `$iar = `$tcp.BeginConnect('1.1.1.1', 443, `$null, `$null)
+    if (-not `$iar.AsyncWaitHandle.WaitOne(4000, `$false)) {
+        Log 'SKIP: internet not reachable - refusing DNS lock (prevents internet brick)'
+        Set-ItemProperty `$REG 'DnsLockdownState' 'DEFERRED' -Force -EA SilentlyContinue
+        exit 0
+    }
+    try { `$tcp.EndConnect(`$iar) } catch {
+        Log 'SKIP: internet probe failed - refusing DNS lock (prevents internet brick)'
+        Set-ItemProperty `$REG 'DnsLockdownState' 'DEFERRED' -Force -EA SilentlyContinue
+        exit 0
+    }
+} catch {
+    Log 'SKIP: internet probe error - refusing DNS lock (prevents internet brick)'
+    Set-ItemProperty `$REG 'DnsLockdownState' 'DEFERRED' -Force -EA SilentlyContinue
+    exit 0
+} finally { if (`$tcp) { try { `$tcp.Close() } catch {} } }
 try {
     New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkConnectivity' -Force | Out-Null
     Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkConnectivity' 'DisableSmartNameResolution' 1 -Type DWord -Force

@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 — Install-SafeNetwork.ps1 (v15.2 boot-safety)
+# Dot-sourced from install.ps1 - Install-SafeNetwork.ps1 (v15.2 boot-safety)
 #Requires -Version 5.1
 
 $script:BOOT_SAFE_WINDOW_SEC = 90
@@ -238,6 +238,18 @@ function Set-BootGraceRegistry {
     } catch {}
 }
 
+function Set-PostInstallGraceRegistry {
+    param([int]$Minutes = 15)
+    if ($script:InstallDryRun) {
+        Write-SafeActionLog "Would set PostInstallGraceUntil for ${Minutes}min"
+        return
+    }
+    try {
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'PostInstallGraceUntil' (Get-Date).AddMinutes($Minutes).ToString('o') -Force
+    } catch {}
+}
+
 function Get-WgSafetyRuntimeScript {
     param([string]$Version = '15.2')
     $bootSec = $script:BOOT_SAFE_WINDOW_SEC
@@ -346,6 +358,14 @@ function Test-UnbrickActive {
     return `$false
 }
 
+function Test-PostInstallGrace {
+    try {
+        `$reg = Get-ItemProperty `$REG_KEY -Name PostInstallGraceUntil -EA SilentlyContinue
+        if (`$reg.PostInstallGraceUntil -and (Get-Date) -lt [datetime]`$reg.PostInstallGraceUntil) { return `$true }
+    } catch {}
+    return `$false
+}
+
 function Test-InstallInProgress {
     if (Test-Path 'C:\WireGuard\install.inprogress') { return `$true }
     try {
@@ -355,7 +375,7 @@ function Test-InstallInProgress {
 }
 
 function Test-BlockAllowed {
-    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace -or (Test-BootSafeWindow)) { return `$false }
+    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace -or Test-PostInstallGrace -or (Test-BootSafeWindow)) { return `$false }
     return `$true
 }
 

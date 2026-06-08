@@ -206,6 +206,18 @@ function Ensure-ServerRule {
     if (`$rewrite -or -not (Test-ServerRulePresent)) { Set-ServerRule }
 }
 
+function Backup-TunnelConfig {
+    if (-not (Test-Path `$CONFIG)) { return `$false }
+    Copy-Item `$CONFIG "`$CONFIG.bak" -Force
+    return `$true
+}
+function Restore-TunnelConfigIfMissing {
+    if (Test-Path `$CONFIG) { return `$true }
+    if (Test-Path "`$CONFIG.bak") { Copy-Item "`$CONFIG.bak" `$CONFIG -Force; return `$true }
+    `$guardCfg = 'C:\ProgramData\WGKillSwitchGuard\wgcf-profile.conf'
+    if (Test-Path `$guardCfg) { Copy-Item `$guardCfg `$CONFIG -Force; return `$true }
+    return `$false
+}
 function Try-ReinstallTunnel {
     `$mux = `$null
     try {
@@ -216,13 +228,31 @@ function Try-ReinstallTunnel {
             return (Test-TunnelRunning)
         }
         if (Test-TunnelRunning) { return `$true }
+        `$svcExists = [bool]((& sc.exe query `$TUNNEL_SVC 2>`$null) -notmatch 'does not exist')
+        if (`$svcExists) {
+            & sc.exe start `$TUNNEL_SVC 2>`$null | Out-Null
+            `$waited = 0
+            while (`$waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 3; `$waited += 3 }
+            if (Test-TunnelRunning) { return `$true }
+        }
+        Restore-TunnelConfigIfMissing | Out-Null
+        if (-not (Test-Path `$CONFIG)) {
+            Log 'TunnelReinstall: config missing - aborting (no uninstall)'
+            return `$false
+        }
         Get-Process -Name "wireguard" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
         `$wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='`$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
         if (`$wgSvcPid -and `$wgSvcPid -gt 0) { Stop-Process -Id `$wgSvcPid -Force -EA SilentlyContinue }
         Start-Sleep -Seconds 2
         for (`$attempt = 1; `$attempt -le 2; `$attempt++) {
+            Backup-TunnelConfig | Out-Null
             & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
             Start-Sleep -Seconds 4
+            Restore-TunnelConfigIfMissing | Out-Null
+            if (-not (Test-Path `$CONFIG)) {
+                Log "TunnelReinstall: config lost after uninstall - attempt `$attempt"
+                continue
+            }
             & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
             & sc.exe start `$TUNNEL_SVC 2>`$null | Out-Null
             `$waited = 0
@@ -347,12 +377,12 @@ if (Test-SafeToOpen -or Test-BootGrace -or Test-UnbrickActive) {
 while (`$true) {
     if (-not `$startupRecovery) { Start-Sleep -Seconds 2 }
     `$startupRecovery = `$false
-    if (Test-UnbrickActive -or Test-BootGrace) {
+    if (Test-UnbrickActive -or Test-BootGrace -or Test-PostInstallGrace) {
         Disable-Block
         Disable-DnsLeakProtection
         Clear-DnsClientCache -EA SilentlyContinue
         if (`$state -ne 'open') {
-            Log "Fail-open hold (unbrick/boot-grace) - internet open"
+            Log "Fail-open hold (unbrick/boot-grace/post-install) - internet open"
             `$state = 'open'; `$wasOpen = `$true
         }
         Start-Sleep -Seconds 30
@@ -776,6 +806,18 @@ function Test-MainMonitorActive {
     return ((GetMonitorShellProcs | Measure-Object).Count -gt 0)
 }
 
+function Backup-TunnelConfig {
+    if (-not (Test-Path $CONFIG)) { return $false }
+    Copy-Item $CONFIG "$CONFIG.bak" -Force
+    return $true
+}
+function Restore-TunnelConfigIfMissing {
+    if (Test-Path $CONFIG) { return $true }
+    if (Test-Path "$CONFIG.bak") { Copy-Item "$CONFIG.bak" $CONFIG -Force; return $true }
+    $guardCfg = 'C:\ProgramData\WGKillSwitchGuard\wgcf-profile.conf'
+    if (Test-Path $guardCfg) { Copy-Item $guardCfg $CONFIG -Force; return $true }
+    return $false
+}
 function Try-ReinstallTunnel {
     $mux = $null
     try {
@@ -786,13 +828,31 @@ function Try-ReinstallTunnel {
             return (Test-TunnelRunning)
         }
         if (Test-TunnelRunning) { return $true }
+        $svcExists = [bool]((& sc.exe query $TUNNEL_SVC 2>$null) -notmatch 'does not exist')
+        if ($svcExists) {
+            & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
+            $waited = 0
+            while ($waited -lt 30 -and -not (Test-TunnelRunning)) { Start-Sleep 3; $waited += 3 }
+            if (Test-TunnelRunning) { return $true }
+        }
+        Restore-TunnelConfigIfMissing | Out-Null
+        if (-not (Test-Path $CONFIG)) {
+            Log 'TunnelReinstall: config missing - aborting (no uninstall)'
+            return $false
+        }
         Get-Process -Name "wireguard" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
         $wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
         if ($wgSvcPid -and $wgSvcPid -gt 0) { Stop-Process -Id $wgSvcPid -Force -EA SilentlyContinue }
         Start-Sleep -Seconds 2
         for ($attempt = 1; $attempt -le 2; $attempt++) {
+            Backup-TunnelConfig | Out-Null
             & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
             Start-Sleep -Seconds 4
+            Restore-TunnelConfigIfMissing | Out-Null
+            if (-not (Test-Path $CONFIG)) {
+                Log "TunnelReinstall: config lost after uninstall - attempt $attempt"
+                continue
+            }
             & $WG_EXE /installtunnelservice $CONFIG 2>$null | Out-Null
             & sc.exe start $TUNNEL_SVC 2>$null | Out-Null
             $waited = 0

@@ -335,7 +335,7 @@ function Install-TorBrowserHint {
         OK ('Tor Browser found: ' + $roots[0])
         return $true
     }
-    WARN 'Tor Browser not installed — install from https://www.torproject.org/download/ then re-run -TorUpgradeOnly'
+    WARN 'Tor Browser not installed - install from https://www.torproject.org/download/ then re-run -TorUpgradeOnly'
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'TorState' 'NOT_INSTALLED' -Force -EA SilentlyContinue
     return $false
 }

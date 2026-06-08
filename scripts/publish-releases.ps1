@@ -88,6 +88,7 @@ $releases = @{
     "v15.2.3" = @{ name = "v15.2.3 - Critical install hotfixes (dnscrypt path, fail-soft privacy stack)" }
     "v15.2.4" = @{ name = "v15.2.4 - Install internet protection (defer DNS lock until dnscrypt healthy)" }
     "v15.2.6" = @{ name = "v15.2.6 - Code review critical fixes (mutex, GPO regex, ScriptsPath, admin order)" }
+    "v15.2.7" = @{ name = "v15.2.7 - Post-install internet protection (grace period, DNS lock gate, tunnel config backup)" }
 }
 
 function Get-ReleaseBody($tag) {

@@ -84,8 +84,9 @@ Remove-KurtarArtifacts
 New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
 Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'EnableFailsafe' ([int]$script:EnableFailsafe) -Type DWord -Force
 Set-BootGraceRegistry -Seconds $script:BOOT_GRACE_SEC
+Set-PostInstallGraceRegistry -Minutes 15
 Clear-InstallLock
-OK "Install lock cleared - $($script:BOOT_GRACE_SEC)s BootGrace (fail-open), then monitor takes over"
+OK "Install lock cleared - $($script:BOOT_GRACE_SEC)s BootGrace + 15min post-install grace (fail-open)"
 if (Test-Path $NSSM) {
     & $NSSM start $WG_SVC_NAME 2>$null | Out-Null
     Start-Sleep 3

@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 â€” Install-Privacy.ps1 (v15.1 modular split)
+# Dot-sourced from install.ps1 - Install-Privacy.ps1 (v15.1 modular split)
 #Requires -Version 5.1
 function Get-ChromiumPrivacyDWordProps {
     return @{
@@ -377,7 +377,7 @@ function Unlock-GuardDirForWrite {
 function Write-GuardBackups {
     Unlock-GuardDirForWrite
     $guardFiles = @(
-        $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
+        $CONFIG, $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
         $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1,
         $PRIVACY_GUARD_PS1, $WEBRTC_GUARD_PS1,
         $DNSCRYPT_GUARD_PS1, $TOR_GUARD_PS1, $TOR_MONITOR_PS1, $LEAK_SENTINEL_PS1,

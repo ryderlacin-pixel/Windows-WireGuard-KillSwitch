@@ -30,8 +30,8 @@ Write-Host "`n>> Version consistency" -ForegroundColor Yellow
 $constants = Get-Content (Join-Path $repoRoot 'lib\Install-Constants.ps1') -Raw -Encoding UTF8
 $install   = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -match "\`$WG_KS_VERSION = '([^']+)'") { $ver = $Matches[1] } else { $ver = '' }
-Assert-Gate ($ver -eq '15.2.6') "WG_KS_VERSION = 15.2.6 (got '$ver')"
-Assert-Gate ($install -match 'v15\.2\.6') 'install.ps1 header version'
+Assert-Gate ($ver -eq '15.2.7') "WG_KS_VERSION = 15.2.7 (got '$ver')"
+Assert-Gate ($install -match 'v15\.2\.7') 'install.ps1 header version'
 Assert-Gate ($constants -notmatch 'Ã¢â‚¬') 'Install-Constants.ps1: no mojibake'
 
 # 3) Critical code-review invariants (static)
@@ -41,6 +41,7 @@ $gen     = Get-Content (Join-Path $repoRoot 'lib\Install-GeneratedScripts.ps1') 
 $privacy = Get-Content (Join-Path $repoRoot 'lib\Install-Privacy.ps1') -Raw -Encoding UTF8
 $tasks   = Get-Content (Join-Path $repoRoot 'lib\Install-TasksAndWmi.ps1') -Raw -Encoding UTF8
 $main06  = Get-Content (Join-Path $repoRoot 'lib\Install-MainSteps-0-6.ps1') -Raw -Encoding UTF8
+$main1820 = Get-Content (Join-Path $repoRoot 'lib\Install-MainSteps-18-20.ps1') -Raw -Encoding UTF8
 $emerBat = Get-Content (Join-Path $repoRoot 'emergency-reset.bat') -Raw -Encoding UTF8
 
 Assert-Gate ($helpers -match '\$acquired = Wait-NamedMutex') 'Log() mutex acquire flag'
@@ -55,15 +56,19 @@ $adminIdx = $install.IndexOf('Administrator')
 $dryRunIdx = $install.IndexOf('$script:InstallDryRun')
 $dotSourceIdx = $install.IndexOf('foreach ($mod in $LibModules)')
 Assert-Gate (($adminIdx -ge 0) -and ($dryRunIdx -gt $adminIdx) -and ($dotSourceIdx -gt $dryRunIdx)) 'admin check before dot-source'
+Assert-Gate ($helpers -match 'Backup-TunnelConfig') 'tunnel config backup before reinstall'
+Assert-Gate ($helpers -match 'Test-SafeToOpen') 'deferred privacy guards require SafeToOpen'
+Assert-Gate ($main1820 -match 'Set-PostInstallGraceRegistry') 'STEP 19 post-install grace'
+Assert-Gate ($gen -match 'Test-PostInstallGrace') 'monitor respects post-install grace'
 Assert-Gate ($emerBat -match '^@echo off') 'emergency-reset.bat is real batch file'
 
 # 4) Release notes exist for current version
 Write-Host "`n>> Release artifact" -ForegroundColor Yellow
-Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.2.6.md')) 'docs/releases/v15.2.6.md exists'
+Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.2.7.md')) 'docs/releases/v15.2.7.md exists'
 
 Write-Host ''
 if ($failures.Count -eq 0) {
-    Write-Host 'PRE-PUSH GATE: PASSED — safe to push to GitHub' -ForegroundColor Green
+    Write-Host 'PRE-PUSH GATE: PASSED - safe to push to GitHub' -ForegroundColor Green
     Write-Host '(This gate does NOT run install.ps1 on this machine.)' -ForegroundColor Gray
     exit 0
 }
