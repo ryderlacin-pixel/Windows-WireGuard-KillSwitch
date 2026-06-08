@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v12.1)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v12.2)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v12.2: tunnel-down debounce (3x/6s before block); repair uses rule-exists not rule-enabled for DNS;
+#   dedupes duplicate firewall rules; watchdog every 1min; repair syncs DNS state after firewall repair.
 # - v12.1: DNS leak rules toggle with block state (fixes internet-open DNS brick); Test-Dns in SafeToOpen;
 #   internet watchdog task (3min) auto-unbricks stuck blocks; emergency unbrick after 5 failed cycles.
 # - v12.0 ultimate: unified version constant; WMI watches powershell+pwsh (single OR query); PID validated
@@ -56,7 +58,7 @@ param(
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '12.1'
+$WG_KS_VERSION = '12.2'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -1219,6 +1221,7 @@ if (Test-SafeToOpen) {
 `$wasOpen = (`$state -eq 'open')
 `$script:dedupeTick = 0
 `$script:tamperTick = 0
+`$script:tunnelLostStreak = 0
 
 while (`$true) {
     if (-not `$startupRecovery) { Start-Sleep -Seconds 2 }
@@ -1240,9 +1243,15 @@ while (`$true) {
         }
     }
 
-    if (`$wasOpen -and -not (Test-TunnelRunning)) {
-        Log "Tunnel lost while open - immediate block"
-        Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
+    if (`$wasOpen) {
+        if (-not (Test-TunnelRunning)) {
+            `$script:tunnelLostStreak++
+            if (`$script:tunnelLostStreak -ge 3) {
+                Log "Tunnel lost while open (confirmed `$(`$script:tunnelLostStreak)x) - block"
+                Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
+                `$script:tunnelLostStreak = 0
+            }
+        } else { `$script:tunnelLostStreak = 0 }
     }
 
     if (Test-SafeToOpen) {
@@ -1445,6 +1454,22 @@ function Test-FwRuleEnabled([string]$name) {
     return ($o -match 'Enabled:\s+Yes')
 }
 
+function Test-FwRuleExists([string]$name) {
+    $o = netsh advfirewall firewall show rule name=$name 2>$null | Out-String
+    return ($o -notmatch 'No rules match')
+}
+
+function Get-FwRuleCount([string]$name) {
+    $o = netsh advfirewall firewall show rule name=$name 2>$null | Out-String
+    if ($o -match 'No rules match') { return 0 }
+    return ([regex]::Matches($o, 'Rule Name:')).Count
+}
+
+function Test-BlockRulePresent {
+    $o = netsh advfirewall firewall show rule name="KS-Block-WiFi-Out" 2>$null | Out-String
+    return ($o -match 'Enabled:\s+Yes')
+}
+
 function Repair-ConfigIntegrity {
     if (-not (Test-Path $CONFIG)) { return }
     try {
@@ -1472,24 +1497,32 @@ function Repair-ConfigIntegrity {
 
 function Repair-EssentialFirewall {
     $serverIp = Get-RepairServerIP
-    $essential = @(
-        @{ N='KS-DNS-Block';     A='netsh advfirewall firewall add rule name="KS-DNS-Block" dir=out action=block protocol=UDP remoteport=53 enable=no' },
-        @{ N='KS-DNS-Block-TCP'; A='netsh advfirewall firewall add rule name="KS-DNS-Block-TCP" dir=out action=block protocol=TCP remoteport=53 enable=no' },
+    $alwaysOn = @(
         @{ N='KS-DNS-Allow';     A='netsh advfirewall firewall add rule name="KS-DNS-Allow" dir=out action=allow protocol=UDP remoteip=1.1.1.1,1.0.0.1 remoteport=53 enable=yes' },
-        @{ N='KS-WireGuard-EXE'; A='netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes' }
+        @{ N='KS-WireGuard-EXE'; A='netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes' },
+        @{ N='KS-WARP-Server-Out'; A="netsh advfirewall firewall add rule name=`"KS-WARP-Server-Out`" dir=out action=allow protocol=UDP remoteip=$serverIp remoteport=$SERVER_PORT enable=yes" }
     )
-    foreach ($e in $essential) {
-        if (-not (Test-FwRuleEnabled $e.N)) {
+    $existsOnly = @(
+        @{ N='KS-DNS-Block';     A='netsh advfirewall firewall add rule name="KS-DNS-Block" dir=out action=block protocol=UDP remoteport=53 enable=no' },
+        @{ N='KS-DNS-Block-TCP'; A='netsh advfirewall firewall add rule name="KS-DNS-Block-TCP" dir=out action=block protocol=TCP remoteport=53 enable=no' }
+    )
+    foreach ($e in $alwaysOn) {
+        $need = (-not (Test-FwRuleExists $e.N)) -or (-not (Test-FwRuleEnabled $e.N)) -or ((Get-FwRuleCount $e.N) -gt 1)
+        if ($need) {
             netsh advfirewall firewall delete rule name=$e.N 2>$null | Out-Null
             Invoke-Expression $e.A | Out-Null
             Log "Firewall restored: $($e.N)"
         }
     }
-    if (-not (Test-FwRuleEnabled 'KS-WARP-Server-Out')) {
-        netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>$null | Out-Null
-        netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIp remoteport=$SERVER_PORT enable=yes | Out-Null
-        Log "Firewall restored: KS-WARP-Server-Out"
+    foreach ($e in $existsOnly) {
+        if (-not (Test-FwRuleExists $e.N) -or ((Get-FwRuleCount $e.N) -gt 1)) {
+            netsh advfirewall firewall delete rule name=$e.N 2>$null | Out-Null
+            Invoke-Expression $e.A | Out-Null
+            Log "Firewall ensured: $($e.N)"
+        }
     }
+    if (Test-SafeToOpen) { Disable-DnsLeakProtection }
+    elseif (Test-BlockRulePresent) { Enable-DnsLeakProtection }
 }
 
 function Test-NetworkChanged {
@@ -1836,7 +1869,7 @@ if (`$blocked -and -not `$healthy) {
     }
     `$count++
     Set-Content `$STUCK_FILE "`$count" -Force -EA SilentlyContinue
-    if (`$count -ge 3) {
+    if (`$count -ge 2) {
         Log "Stuck `$count cycles with blocks - emergency unbrick"
         Remove-OutboundBlocks
         Clear-DnsClientCache -EA SilentlyContinue
@@ -2408,7 +2441,7 @@ $actionWdParams = @{
     Argument = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WATCHDOG_PS1`""
 }
 $actionWd   = New-ScheduledTaskAction @actionWdParams
-$triggerWd  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 3) -RepetitionDuration (New-TimeSpan -Days 3650)
+$triggerWd  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settingsWdParams = @{
     ExecutionTimeLimit         = (New-TimeSpan -Minutes 5)
     StartWhenAvailable         = $true
@@ -2421,7 +2454,7 @@ $settingsWd  = New-ScheduledTaskSettingsSet @settingsWdParams
 $principalWd = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskName $TASK_WATCHDOG -Action $actionWd -Trigger $triggerWd -Settings $settingsWd -Principal $principalWd -Force | Out-Null
 $gWd = Get-ScheduledTask -TaskName $TASK_WATCHDOG -EA SilentlyContinue
-if ($gWd) { OK "WG-InternetWatchdog registered ($($gWd.State)) - every 3min" }
+if ($gWd) { OK "WG-InternetWatchdog registered ($($gWd.State)) - every 1min" }
 else       { WARN "WG-InternetWatchdog task registration failed" }
 
 # ================================================================
@@ -2743,7 +2776,7 @@ Write-Host "  [6] Startup folder shortcut"                        -ForegroundCol
 Write-Host "  [7] GPO Machine Startup Script"                     -ForegroundColor DarkGray
 Write-Host "  [8] HKLM Run key"                                   -ForegroundColor DarkGray
 Write-Host "  [9] WG-RebootVerify: auto audit 5min after boot"   -ForegroundColor DarkGray
-Write-Host "  [10] WG-InternetWatchdog: auto-unbrick every 3min"  -ForegroundColor DarkGray
+Write-Host "  [10] WG-InternetWatchdog: auto-unbrick every 1min"  -ForegroundColor DarkGray
 Write-Host "  [+] Anti-tamper guard: silent restore from vault"  -ForegroundColor DarkGray
 Write-Host "  Reboot log: C:\WireGuard\reboot-verify.log"         -ForegroundColor DarkGray
 Write-Host ""

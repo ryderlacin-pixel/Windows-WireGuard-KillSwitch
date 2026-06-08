@@ -71,7 +71,7 @@ if (-not $healthy) {
 
 # [2] Registry
 $reg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($reg -and $reg.Version -ge '12.1') "Registry version 12.1+ (got $($reg.Version))"
+Assert ($reg -and $reg.Version -ge '12.2') "Registry version 12.2+ (got $($reg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat deployed'
@@ -85,13 +85,15 @@ $svc = Get-Content 'C:\WireGuard\service-monitor.ps1' -Raw -EA SilentlyContinue
 $wmi = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v12\.1') 'monitor.ps1 version v12.1'
+Assert ($mon -match 'v12\.2') 'monitor.ps1 version v12.2'
+Assert ($mon -match 'tunnelLostStreak') 'monitor debounces tunnel-down before block'
 Assert ($mon -match 'Disable-DnsLeakProtection') 'monitor toggles DNS leak with block state'
 Assert ($mon -match 'Test-Dns') 'monitor includes DNS health check'
 Assert ($mon -match 'oldCmd -match') 'monitor PID validated by command-line'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
 Assert ($mon -match 'DNS flush') 'monitor zombie uses DNS flush not reinstall'
-Assert ($rep -match 'v12\.1|Repair Script v12') 'repair.ps1 version v12.1'
+Assert ($rep -match 'v12\.2|Repair Script v12') 'repair.ps1 version v12.2'
+Assert ($rep -match 'Test-FwRuleExists') 'repair uses rule-exists check for DNS'
 Assert ($rep -match 'Disable-DnsLeakProtection') 'repair toggles DNS leak with block state'
 Assert ($rep -match 'deferring reinstall') 'repair defers to active monitor'
 Assert ($rep -match 'Try-ReinstallTunnel') 'repair has mutex reinstall'
