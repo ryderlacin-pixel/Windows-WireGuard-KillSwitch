@@ -9,13 +9,13 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.5** is the current production release (privacy engineer pass + kill switch — protection always stays installed).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v15.0** is the current production release (strong privacy stack + kill switch — protection always stays installed).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.5](docs/releases/v13.5.md)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.0](docs/releases/v15.0.md)**.
 
 **Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
 
@@ -269,7 +269,19 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v13.5 (production — current)
+### v15.0 (production — current)
+- **Strong privacy:** system DNS lock (all adapters `127.0.0.1`), LLMNR/NetBIOS off, quad9-only dnscrypt (`require_nolog`)
+- `KS-Dnscrypt-EXE` firewall rule, `sensitive-mode.ps1` + **Hassas-Tarama.lnk** (Tor sensitive browsing)
+- Upgrade: `.\install.ps1 -StrongPrivacyUpgrade -NoPause` · Recovery: `.\scripts\restore-full-stack.ps1`
+- Gates: `privacy-audit.ps1` (STRONG), `leak-audit.ps1`, `safe-live-verify.ps1` (77 checks)
+- See **[docs/releases/v15.0.md](docs/releases/v15.0.md)**
+
+### v14.0
+- dnscrypt-proxy + Tor hardening + leak-sentinel (read-only)
+- Phased: `-DnsLeakUpgradeOnly`, `-TorUpgradeOnly`, `-FullPrivacyUpgrade`
+- See **[docs/releases/v14.0.md](docs/releases/v14.0.md)**
+
+### v13.5
 - **Privacy engineer pass:** Privacy Sandbox/DoH/QUIC off, Firefox RFP+, WER reduced, script SHA256 vault
 - Honest scores: leak **8–8.5/10**, tracking **7.5–8/10**, anonymity **7–8/10** (WARP threat model)
 - Fast upgrade: `.\install.ps1 -PrivacyUpgradeOnly`

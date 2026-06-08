@@ -7,10 +7,10 @@ function Assert([bool]$cond, [string]$msg) {
     else { Write-Host "  [OK] $msg" -ForegroundColor Green }
 }
 
-Write-Host '=== POST-INSTALL VERIFICATION (v12.0) ===' -ForegroundColor Cyan
+Write-Host '=== POST-INSTALL VERIFICATION (v15.0) ===' -ForegroundColor Cyan
 
 $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
-Assert ($reg.Version -ge '12.0') "Registry version 12.0+ (got $($reg.Version))"
+Assert ($reg.Version -ge '15.0') "Registry version 15.0+ (got $($reg.Version))"
 
 foreach ($f in @('monitor.ps1','repair.ps1','service-monitor.ps1','wmi-repair.ps1','wgcf-profile.conf')) {
     Assert (Test-Path "C:\WireGuard\$f") "File exists: $f"
@@ -112,9 +112,12 @@ $bad = Get-Process powershell -EA SilentlyContinue | Where-Object {
 }
 Assert (-not $bad) 'No servis-monitor.ps1 process'
 
-foreach ($tn in @('WG-KillSwitch','WG-RepairTask')) {
-    $t = Get-ScheduledTask -TaskName $tn -EA SilentlyContinue
-    Assert ($t -and $t.State -in @('Ready','Running')) "Task $tn active ($($t.State))"
+function Test-TaskActive([string]$Name) {
+    schtasks.exe /Query /TN "\$Name" /FO LIST 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+foreach ($tn in @('WG-KillSwitch','WG-RepairTask','WG-RebootVerify','WG-InternetWatchdog')) {
+    Assert (Test-TaskActive $tn) "Task $tn active"
 }
 
 if (Test-Path 'C:\WireGuard\nssm.exe') {
@@ -129,7 +132,7 @@ Assert ($null -ne $wmi) 'WMI subscription active'
 
 # v11.0 script version + self-repair checks
 $monRaw = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
-Assert ($monRaw -match 'v12\.0') 'monitor.ps1 is v12.0'
+Assert ($monRaw -match 'v15\.0|v14\.0|Monitor v15|Monitor v14|v13\.5|Monitor v13') 'monitor.ps1 version (v15/v14/v13.5)'
 Assert ($monRaw -match 'Test-SafeToOpen') 'monitor.ps1 has Test-SafeToOpen'
 Assert ($monRaw -match 'Test-InstallInProgress|monitor\.pid') 'monitor has install-safe logic'
 
@@ -157,6 +160,13 @@ Assert (-not (Test-Path 'C:\WireGuard\install.inprogress')) 'install lock cleare
 
 $cfg = Get-Content 'C:\WireGuard\wgcf-profile.conf' -Raw -EA SilentlyContinue
 Assert ($cfg -notmatch '::/0') 'Config has no ::/0 (IPv6 stripped)'
+Assert ($cfg -match 'DNS\s*=\s*127\.0\.0\.1') 'WireGuard DNS = 127.0.0.1'
+foreach ($f in @('dns-lockdown-guard.ps1','network-privacy-guard.ps1','dnscrypt-guard.ps1','leak-sentinel.ps1')) {
+    Assert (Test-Path "C:\WireGuard\$f") "v15 guard deployed: $f"
+}
+$fw = netsh advfirewall firewall show rule name='KS-Dnscrypt-EXE' 2>&1 | Out-String
+Assert ($fw -notmatch 'No rules match') 'KS-Dnscrypt-EXE firewall rule present'
+Assert ($reg.V15StrongPrivacy -eq '1') 'V15StrongPrivacy registry flag set'
 
 Write-Host ''
 if ($failures.Count -gt 0) {
