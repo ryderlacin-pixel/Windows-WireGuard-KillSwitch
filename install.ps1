@@ -192,10 +192,28 @@ $script:CimShort = $null
 function Get-ShortCimSession {
     if ($script:CimShort) { return $script:CimShort }
     try {
-        $opt = New-CimSessionOption -OperationTimeoutSec 8
+        $opt = New-CimSessionOption -OperationTimeout (New-TimeSpan -Seconds 8)
         $script:CimShort = New-CimSession -SessionOption $opt -ErrorAction Stop
     } catch { $script:CimShort = $null }
     return $script:CimShort
+}
+
+function Get-WmiBindFilter([string]$FilterName = $WMI_FILTER) {
+    return "Filter = ""__EventFilter.Name='$FilterName'"""
+}
+
+function Test-WmiSubscriptionActive {
+    try {
+        $cim = Get-ShortCimSession
+        $ca = @{ Namespace = 'root\subscription' }
+        if ($cim) { $ca['CimSession'] = $cim }
+        $f = Get-CimInstance @ca -ClassName __EventFilter -Filter "Name='$WMI_FILTER'" -EA SilentlyContinue
+        if (-not $f) { return $false }
+        $c = Get-CimInstance @ca -ClassName CommandLineEventConsumer -Filter "Name='$WMI_CONSUMER'" -EA SilentlyContinue
+        if (-not $c) { return $false }
+        $b = Get-CimInstance @ca -ClassName __FilterToConsumerBinding -Filter (Get-WmiBindFilter) -EA SilentlyContinue
+        return [bool]$b
+    } catch { return $false }
 }
 
 function Invoke-Schtasks($args, [int]$timeoutSec = 5) {
@@ -554,30 +572,32 @@ function Test-DelayedAutoStart {
 }
 
 function Install-WmiSubscription {
+    if (Test-WmiSubscriptionActive) { return $true }
     $cim = Get-ShortCimSession
-    $cimArgs = @{}
-    if ($cim) { $cimArgs['CimSession'] = $cim }
-    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='$WMI_FILTER'" @cimArgs -EA SilentlyContinue |
+    $ca = @{ Namespace = 'root\subscription' }
+    if ($cim) { $ca['CimSession'] = $cim }
+    Get-CimInstance @ca -ClassName __EventFilter -Filter "Name='$WMI_FILTER'" -EA SilentlyContinue |
         Remove-CimInstance -EA SilentlyContinue
-    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='$WMI_CONSUMER'" @cimArgs -EA SilentlyContinue |
+    Get-CimInstance @ca -ClassName CommandLineEventConsumer -Filter "Name='$WMI_CONSUMER'" -EA SilentlyContinue |
         Remove-CimInstance -EA SilentlyContinue
-    $bindFilter = "Filter = ""__EventFilter.Name='$WMI_FILTER'"""
-    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter $bindFilter @cimArgs -EA SilentlyContinue |
+    Get-CimInstance @ca -ClassName __FilterToConsumerBinding -Filter (Get-WmiBindFilter) -EA SilentlyContinue |
         Remove-CimInstance -EA SilentlyContinue
     $wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name='powershell.exe' OR TargetInstance.Name='pwsh.exe')"
+    $nca = @{ Namespace = 'root\subscription' }
+    if ($cim) { $nca['CimSession'] = $cim }
     try {
-        $filter = New-CimInstance -Namespace root\subscription -ClassName __EventFilter -Property @{
+        $filter = New-CimInstance @nca -ClassName __EventFilter -Property @{
             Name=$WMI_FILTER; EventNamespace='root\cimv2'; QueryLanguage='WQL'; Query=$wmiQuery
         } -EA Stop
-        $consumer = New-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Property @{
+        $consumer = New-CimInstance @nca -ClassName CommandLineEventConsumer -Property @{
             Name=$WMI_CONSUMER
             CommandLineTemplate="powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WMI_WRAPPER`""
         } -EA Stop
         if ($filter -and $consumer) {
-            New-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Property @{
+            New-CimInstance @nca -ClassName __FilterToConsumerBinding -Property @{
                 Filter=[Ref]$filter; Consumer=[Ref]$consumer
             } -EA Stop | Out-Null
-            return $true
+            return (Test-WmiSubscriptionActive)
         }
     } catch {
         Write-Info "WMI subscription failed: $($_.Exception.Message)"
@@ -2496,14 +2516,26 @@ function Restore-GpoBootScript {
     }
     return `$fixed
 }
+function Test-WmiSubscriptionActive {
+    try {
+        `$bf = "Filter = ""__EventFilter.Name='`$WMI_FILTER'"""
+        `$f = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='`$WMI_FILTER'" -EA SilentlyContinue
+        if (-not `$f) { return `$false }
+        `$c = Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='`$WMI_CONSUMER'" -EA SilentlyContinue
+        if (-not `$c) { return `$false }
+        `$b = Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter `$bf -EA SilentlyContinue
+        return [bool]`$b
+    } catch { return `$false }
+}
 function Restore-WmiSubscription {
-    `$existing = Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -EA SilentlyContinue |
-        Where-Object { `$_.Filter -like "*`$WMI_FILTER*" }
-    if (`$existing) { return `$false }
-    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
-        Where-Object { `$_.Name -eq `$WMI_FILTER } | Remove-CimInstance -EA SilentlyContinue
-    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -EA SilentlyContinue |
-        Where-Object { `$_.Name -eq `$WMI_CONSUMER } | Remove-CimInstance -EA SilentlyContinue
+    if (Test-WmiSubscriptionActive) { return `$false }
+    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='`$WMI_FILTER'" -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='`$WMI_CONSUMER'" -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
+    `$bf = "Filter = ""__EventFilter.Name='`$WMI_FILTER'"""
+    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter `$bf -EA SilentlyContinue |
+        Remove-CimInstance -EA SilentlyContinue
     `$wmiQuery = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name='powershell.exe' OR TargetInstance.Name='pwsh.exe')"
     try {
         `$filter = New-CimInstance -Namespace root\subscription -ClassName __EventFilter -Property @{
@@ -2517,9 +2549,11 @@ function Restore-WmiSubscription {
             New-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Property @{
                 Filter=[Ref]`$filter; Consumer=[Ref]`$consumer
             } -EA Stop | Out-Null
-            Log-Tamper 'WMI subscription restored'
-            Write-TamperEvent 'WGKillSwitch restored WMI permanent subscription'
-            return `$true
+            if (Test-WmiSubscriptionActive) {
+                Log-Tamper 'WMI subscription restored'
+                Write-TamperEvent 'WGKillSwitch restored WMI permanent subscription'
+                return `$true
+            }
         }
     } catch {}
     return `$false
@@ -2778,33 +2812,7 @@ if (Test-Path $NSSM) {
 # ================================================================
 Write-Step "STEP 15 - WMI SUBSCRIPTION"
 # ================================================================
-$wmiOk = $false
-$wmiJob = Start-Job -ArgumentList $WMI_FILTER, $WMI_CONSUMER, $WMI_WRAPPER -ScriptBlock {
-    param($filt, $cons, $wrap)
-    $cim = $null
-    try {
-        $opt = New-CimSessionOption -OperationTimeoutSec 8
-        $cim = New-CimSession -SessionOption $opt -ErrorAction Stop
-    } catch {}
-    $ca = @{}
-    if ($cim) { $ca['CimSession'] = $cim }
-    Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='$filt'" @ca -EA SilentlyContinue | Remove-CimInstance -EA SilentlyContinue
-    Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='$cons'" @ca -EA SilentlyContinue | Remove-CimInstance -EA SilentlyContinue
-    $bf = "Filter = ""__EventFilter.Name='$filt'"""
-    Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter $bf @ca -EA SilentlyContinue | Remove-CimInstance -EA SilentlyContinue
-    $q = "SELECT * FROM __InstanceDeletionEvent WITHIN 5 WHERE TargetInstance ISA 'Win32_Process' AND (TargetInstance.Name='powershell.exe' OR TargetInstance.Name='pwsh.exe')"
-    $filter = New-CimInstance -Namespace root\subscription -ClassName __EventFilter -Property @{ Name=$filt; EventNamespace='root\cimv2'; QueryLanguage='WQL'; Query=$q } -EA Stop
-    $consumer = New-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Property @{ Name=$cons; CommandLineTemplate="powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$wrap`"" } -EA Stop
-    if ($filter -and $consumer) {
-        New-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Property @{ Filter=[Ref]$filter; Consumer=[Ref]$consumer } -EA Stop | Out-Null
-        return $true
-    }
-    return $false
-}
-if (Wait-Job $wmiJob -Timeout 35) { $wmiOk = [bool](Receive-Job $wmiJob) }
-else { Stop-Job $wmiJob -EA SilentlyContinue }
-Remove-Job $wmiJob -Force -EA SilentlyContinue
-if ($wmiOk) { OK "WMI Event Subscription active" }
+if (Install-WmiSubscription) { OK "WMI Event Subscription active" }
 else { WARN "WMI Subscription failed - 7 other layers still active" }
 
 # ================================================================
@@ -3054,9 +3062,8 @@ Ensure-DelayedAutoStart
 if (Test-DelayedAutoStart) { OK "Tunnel service: delayed-auto-start enforced" }
 else { WARN "Tunnel service: delayed-auto not confirmed (sc qc)"; $warnings++ }
 
-$wmiK = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue |
-    Where-Object { $_.Name -eq $WMI_FILTER }
-if ($wmiK) { OK "WMI Subscription: ACTIVE" } else { WARN "WMI Subscription: missing"; $warnings++ }
+if (Test-WmiSubscriptionActive) { OK "WMI Subscription: ACTIVE (filter+consumer+binding)" }
+else { WARN "WMI Subscription: missing or incomplete"; $warnings++ }
 if (Test-Path $STARTUP_LNK) { OK "Startup shortcut: present" } else { WARN "Startup shortcut: missing"; $warnings++ }
 if (Test-Path $GPO_SCRIPT)  { OK "GPO script: present" }       else { WARN "GPO script: missing";       $warnings++ }
 if (Test-Path $ANTI_TAMPER_PS1) { OK "anti-tamper.ps1: present" } else { WARN "anti-tamper.ps1: missing"; $warnings++ }

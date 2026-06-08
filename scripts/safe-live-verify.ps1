@@ -63,6 +63,18 @@ function Test-TaskExists([string]$Name) {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Test-WmiSubscriptionActive {
+    try {
+        $f = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -Filter "Name='WGMonitorFilter'" -EA SilentlyContinue
+        if (-not $f) { return $false }
+        $c = Get-CimInstance -Namespace root\subscription -ClassName CommandLineEventConsumer -Filter "Name='WGMonitorConsumer'" -EA SilentlyContinue
+        if (-not $c) { return $false }
+        $bf = 'Filter = "__EventFilter.Name=''WGMonitorFilter''"'
+        $b = Get-CimInstance -Namespace root\subscription -ClassName __FilterToConsumerBinding -Filter $bf -EA SilentlyContinue
+        return [bool]$b
+    } catch { return $false }
+}
+
 function Get-MonitorCount {
     if (-not (Test-Path 'C:\WireGuard\killswitch.log')) { return 0 }
     $today = Get-Date -Format 'yyyy-MM-dd'
@@ -94,6 +106,8 @@ Assert (-not (Test-Path 'C:\WireGuard\resume-after-unbrick.ps1')) 'resume-after-
 Assert (Test-Path 'C:\WireGuard\anti-tamper.ps1') 'anti-tamper.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\privacy-hardening-guard.ps1') 'privacy-hardening-guard.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\webrtc-leak-guard.ps1') 'webrtc-leak-guard.ps1 deployed'
+Assert (Test-Path 'C:\WireGuard\wmi-repair.ps1') 'wmi-repair.ps1 deployed'
+Assert (Test-WmiSubscriptionActive) 'WMI subscription: filter+consumer+binding'
 Assert (-not (Test-Path 'C:\WireGuard\install.inprogress')) 'install lock cleared'
 
 $mon = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
