@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.2)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.3)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v13.3: system-level WebRTC leak guard — Chromium/Brave/Edge HKLM policies + Firefox
+#   policies.json; webrtc-leak-guard.ps1 re-applied by repair/anti-tamper vault.
 # - v13.2: kurtar.bat/ps1/kurtar2 removed — protection never torn down; watchdog/monitor use
 #   gentle deep-unbrick only (blocks off + UnbrickUntil, tasks/service stay running).
 # - v13.1: repair/GPO/SVC never Enable-Block (monitor-only block authority); startup fail-open;
@@ -67,7 +69,7 @@ param(
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '13.2'
+$WG_KS_VERSION = '13.3'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -101,6 +103,7 @@ $GPO_INI      = "$GPO_INI_DIR\scripts.ini"
 $INSTALL_LOCK = "$INSTALL_DIR\install.inprogress"
 $GUARD_DIR    = 'C:\ProgramData\WGKillSwitchGuard'
 $ANTI_TAMPER_PS1 = "$INSTALL_DIR\anti-tamper.ps1"
+$WEBRTC_GUARD_PS1 = "$INSTALL_DIR\webrtc-leak-guard.ps1"
 
 # -- Custom mode (full validation in STEP 0) --
 $CUSTOM_MODE = ($CustomConfig -ne "")
@@ -319,6 +322,52 @@ function Disable-AllIPv6Bindings {
         ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -EA SilentlyContinue }
 }
 
+function Install-WebRtcLeakProtection {
+    $chromium = @(
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Google\Chrome'; Label = 'Chrome' },
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label = 'Edge' },
+        @{ Path = 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label = 'Brave' }
+    )
+    foreach ($b in $chromium) {
+        try {
+            New-Item -Path $b.Path -Force | Out-Null
+            Set-ItemProperty $b.Path 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
+            Set-ItemProperty $b.Path 'WebRtcLocalhostCandidateAllowed' 0 -Type DWord -Force
+            OK "WebRTC policy: $($b.Label)"
+        } catch { WARN "WebRTC policy failed: $($b.Label)" }
+    }
+    $ffPolicy = @'
+{
+  "policies": {
+    "Preferences": {
+      "media.peerconnection.ice.no_host": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "media.peerconnection.ice.default_address_only": {
+        "Value": true,
+        "Status": "locked"
+      }
+    }
+  }
+}
+'@
+    foreach ($ffDir in @('C:\Program Files\Mozilla Firefox\distribution', 'C:\Program Files (x86)\Mozilla Firefox\distribution')) {
+        $ffRoot = Split-Path $ffDir -Parent
+        if (-not (Test-Path $ffRoot)) { continue }
+        try {
+            New-Item -Path $ffDir -ItemType Directory -Force | Out-Null
+            $ffPolicy | Set-Content (Join-Path $ffDir 'policies.json') -Encoding UTF8 -Force
+            OK "WebRTC policy: Firefox ($ffRoot)"
+        } catch { WARN "WebRTC policy failed: Firefox ($ffRoot)" }
+    }
+}
+
+function Test-WebRtcChromiumPolicy([string]$VendorPath) {
+    $p = Get-ItemProperty "HKLM:\SOFTWARE\Policies\$VendorPath" -EA SilentlyContinue
+    return ($p -and $p.WebRtcIpHandlingPolicy -eq 'default_public_interface_only' -and $p.WebRtcLocalhostCandidateAllowed -eq 0)
+}
+
 function Stop-AllMonitorProcs {
     Get-CimInstance Win32_Process -EA SilentlyContinue |
         Where-Object { (Test-IsMainMonitor $_.CommandLine) } |
@@ -421,7 +470,7 @@ function Write-GuardBackups {
     Unlock-GuardDirForWrite
     $guardFiles = @(
         $MONITOR_PS1, $REPAIR_PS1, $SERVICE_PS1, $WMI_WRAPPER,
-        $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1
+        $REBOOT_VERIFY_PS1, $WATCHDOG_PS1, $GPO_SCRIPT, $ANTI_TAMPER_PS1, $WEBRTC_GUARD_PS1
     )
     foreach ($f in $guardFiles) {
         if (Test-Path $f) {
@@ -1704,6 +1753,9 @@ try {
     $atScript = 'C:\WireGuard\anti-tamper.ps1'
     if (Test-Path $atScript) { & $atScript -NoChainRepair }
 
+    $wgRtc = 'C:\WireGuard\webrtc-leak-guard.ps1'
+    if (Test-Path $wgRtc) { & $wgRtc }
+
     Repair-ConfigIntegrity
     Repair-EssentialFirewall
     if (Test-NetworkChanged) {
@@ -2351,6 +2403,60 @@ attrib +S +H $ANTI_TAMPER_PS1 2>$null | Out-Null
 OK "anti-tamper.ps1 written"
 
 # ================================================================
+Write-Step "STEP 10c - WEBRTC LEAK GUARD SCRIPT"
+# ================================================================
+$webrtcGuardVersion = $WG_KS_VERSION
+$webrtcGuardContent = @"
+# WebRTC Leak Guard v$webrtcGuardVersion (auto-generated by install.ps1)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$LOG = 'C:\WireGuard\killswitch.log'
+function Log(`$m) {
+    try { Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WEBRTC] `$m" -Encoding UTF8 } catch {}
+}
+`$chromium = @(
+    @{ Path = 'HKLM:\SOFTWARE\Policies\Google\Chrome'; Label = 'Chrome' },
+    @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Label = 'Edge' },
+    @{ Path = 'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; Label = 'Brave' }
+)
+foreach (`$b in `$chromium) {
+    try {
+        New-Item -Path `$b.Path -Force | Out-Null
+        Set-ItemProperty `$b.Path 'WebRtcIpHandlingPolicy' 'default_public_interface_only' -Type String -Force
+        Set-ItemProperty `$b.Path 'WebRtcLocalhostCandidateAllowed' 0 -Type DWord -Force
+        Log "`$(`$b.Label) WebRTC policy applied"
+    } catch { Log "`$(`$b.Label) WebRTC policy failed: `$_" }
+}
+`$ffPolicy = @'
+{
+  "policies": {
+    "Preferences": {
+      "media.peerconnection.ice.no_host": {
+        "Value": true,
+        "Status": "locked"
+      },
+      "media.peerconnection.ice.default_address_only": {
+        "Value": true,
+        "Status": "locked"
+      }
+    }
+  }
+}
+'@
+foreach (`$ffDir in @('C:\Program Files\Mozilla Firefox\distribution', 'C:\Program Files (x86)\Mozilla Firefox\distribution')) {
+    `$ffRoot = Split-Path `$ffDir -Parent
+    if (-not (Test-Path `$ffRoot)) { continue }
+    try {
+        New-Item -Path `$ffDir -ItemType Directory -Force | Out-Null
+        `$ffPolicy | Set-Content (Join-Path `$ffDir 'policies.json') -Encoding UTF8 -Force
+        Log "Firefox WebRTC policy applied (`$ffRoot)"
+    } catch { Log "Firefox WebRTC policy failed: `$_" }
+}
+"@
+$webrtcGuardContent | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
+attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
+OK "webrtc-leak-guard.ps1 written"
+
+# ================================================================
 Write-Step "STEP 11 - MAIN SCHEDULED TASK (60s boot delay)"
 # ================================================================
 Remove-TaskFully $TASK_MONITOR
@@ -2710,6 +2816,12 @@ try { Add-MpPreference -ExclusionPath $INSTALL_DIR -EA Stop; OK "Defender exclus
 catch { WARN "Defender exclusion failed" }
 
 # ================================================================
+Write-Step "STEP 18b - WEBRTC LEAK PROTECTION"
+# ================================================================
+Install-WebRtcLeakProtection
+if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: deployed" } else { WARN "webrtc-leak-guard.ps1: missing" }
+
+# ================================================================
 Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
 # ================================================================
 Ensure-TunnelForInstall | Out-Null
@@ -2827,6 +2939,12 @@ OK "killswitch.log: accessible"
 $defExcl = (Get-MpPreference -EA SilentlyContinue).ExclusionPath
 if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { WARN "Defender exclusion: inactive" }
 
+foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
+    if (Test-WebRtcChromiumPolicy $pair[0]) { OK "WebRTC policy: $($pair[1])" }
+    else { WARN "WebRTC policy: $($pair[1]) missing"; $warnings++ }
+}
+if (Test-Path $WEBRTC_GUARD_PS1) { OK "webrtc-leak-guard.ps1: present" } else { WARN "webrtc-leak-guard.ps1: missing"; $warnings++ }
+
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
 Log "install.ps1 v$WG_KS_VERSION completed"
@@ -2856,6 +2974,7 @@ Write-Host "  [8] HKLM Run key"                                   -ForegroundCol
 Write-Host "  [9] WG-RebootVerify: auto audit 5min after boot"   -ForegroundColor DarkGray
 Write-Host "  [10] WG-InternetWatchdog: auto-unbrick every 1min"  -ForegroundColor DarkGray
 Write-Host "  [+] Anti-tamper guard: silent restore from vault"  -ForegroundColor DarkGray
+Write-Host "  [+] WebRTC leak guard: Chromium/Edge/Brave/Firefox policies" -ForegroundColor DarkGray
 Write-Host "  Reboot log: C:\WireGuard\reboot-verify.log"         -ForegroundColor DarkGray
 Write-Host ""
 if ($CUSTOM_MODE) {

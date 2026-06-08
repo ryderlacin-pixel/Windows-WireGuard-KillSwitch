@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v13.2 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v13.3 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -74,7 +74,7 @@ function Get-MonitorCount {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  SAFE LIVE VERIFY (v13.2 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  SAFE LIVE VERIFY (v13.3 - non-disruptive)" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $healthy = Test-SafeToOpen
@@ -84,7 +84,7 @@ if (-not $healthy) {
 }
 
 $ksReg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($ksReg -and $ksReg.Version -ge '13.2') "Registry version 13.2+ (got $($ksReg.Version))"
+Assert ($ksReg -and $ksReg.Version -ge '13.3') "Registry version 13.3+ (got $($ksReg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
 Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) 'kurtar.bat removed'
@@ -92,6 +92,7 @@ Assert (-not (Test-Path 'C:\WireGuard\kurtar.ps1')) 'kurtar.ps1 removed'
 Assert (-not (Test-Path 'C:\WireGuard\kurtar2.ps1')) 'kurtar2.ps1 removed'
 Assert (-not (Test-Path 'C:\WireGuard\resume-after-unbrick.ps1')) 'resume-after-unbrick.ps1 removed'
 Assert (Test-Path 'C:\WireGuard\anti-tamper.ps1') 'anti-tamper.ps1 deployed'
+Assert (Test-Path 'C:\WireGuard\webrtc-leak-guard.ps1') 'webrtc-leak-guard.ps1 deployed'
 
 $mon = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
 $rep = Get-Content 'C:\WireGuard\repair.ps1' -Raw -EA SilentlyContinue
@@ -100,7 +101,7 @@ $wmi = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
 $wd = Get-Content 'C:\WireGuard\internet-watchdog.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v13\.2') 'monitor.ps1 version v13.2'
+Assert ($mon -match 'v13\.3') 'monitor.ps1 version v13.3'
 Assert ($mon -match 'Test-TunnelAdapterUp') 'monitor dual-check: service + adapter'
 Assert ($mon -match 'Test-BootGrace') 'monitor has BootGrace fail-open'
 Assert ($mon -match 'Test-BlockAllowed') 'monitor has block-allowed guard'
@@ -112,7 +113,8 @@ Assert ($mon -match 'tunnelLostStreak') 'monitor debounces tunnel-down (5x)'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
 Assert ($mon -match 'protection stays installed') 'monitor emergency unbrick keeps protection'
 Assert ($mon -notmatch 'kurtar') 'monitor has no kurtar references'
-Assert ($rep -match 'v13\.2|Repair Script v13') 'repair.ps1 version v13.2'
+Assert ($rep -match 'v13\.3|Repair Script v13') 'repair.ps1 version v13.3'
+Assert ($rep -match 'webrtc-leak-guard\.ps1') 'repair re-applies WebRTC guard'
 Assert ($rep -match 'monitor-only block authority') 'repair never blocks (monitor-only)'
 Assert ($rep -notmatch 'function Enable-Block') 'repair has no Enable-Block function'
 Assert ($rep -match 'Test-BootGrace') 'repair respects BootGrace'
@@ -123,7 +125,7 @@ Assert ($wd -match 'streak') 'watchdog graduated response'
 Assert ($wd -notmatch 'kurtar') 'watchdog has no kurtar references'
 Assert ($wd -match 'Test-TunnelAdapterUp') 'watchdog dual-check tunnel'
 Assert ($svc -match 'Test-HoldActive') 'service-monitor respects BootGrace/Unbrick'
-Assert ($gpo -match 'v13\.2') 'GPO script version v13.2'
+Assert ($gpo -match 'v13\.3') 'GPO script version v13.3'
 Assert ($gpo -match 'Test-BootGrace') 'GPO respects BootGrace'
 Assert ($gpo -match 'never blocks') 'GPO has no block authority'
 
@@ -154,6 +156,14 @@ if ($healthy) {
 Assert (Test-Path 'C:\ProgramData\WGKillSwitchGuard') 'Anti-tamper guard vault present'
 $guardCount = (Get-ChildItem 'C:\ProgramData\WGKillSwitchGuard' -Force -EA SilentlyContinue | Measure-Object).Count
 Assert ($guardCount -ge 8) "Guard vault file count >= 8 (got $guardCount)"
+
+foreach ($pair in @(@('Google\Chrome','Chrome'), @('Microsoft\Edge','Edge'), @('BraveSoftware\Brave','Brave'))) {
+    $wp = Get-ItemProperty "HKLM:\SOFTWARE\Policies\$($pair[0])" -EA SilentlyContinue
+    Assert ($wp -and $wp.WebRtcIpHandlingPolicy -eq 'default_public_interface_only' -and $wp.WebRtcLocalhostCandidateAllowed -eq 0) "WebRTC policy: $($pair[1])"
+}
+$wgRtc = Get-Content 'C:\WireGuard\webrtc-leak-guard.ps1' -Raw -EA SilentlyContinue
+Assert ($wgRtc -match 'WebRtcIpHandlingPolicy') 'webrtc-leak-guard has Chromium policies'
+Assert ($wgRtc -match 'default_public_interface_only') 'webrtc-leak-guard restricts to public interface'
 
 Assert (Test-Internet) 'Post-check: TCP internet still working'
 
