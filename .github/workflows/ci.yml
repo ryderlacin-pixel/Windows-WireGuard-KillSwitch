@@ -25,7 +25,8 @@ concurrency:
 jobs:
   quality-gate:
     name: Offline quality gate (Windows)
-    runs-on: windows-latest
+    # Self-hosted bypasses GitHub-hosted billing lock; falls back when a hosted runner is available.
+    runs-on: [self-hosted, Windows, X64, wg-ci]
     timeout-minutes: 15
 
     steps:
