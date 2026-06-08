@@ -1,6 +1,6 @@
 # Dot-sourced from install.ps1 Ã¢â‚¬â€ Install-Constants.ps1 (v15.1 modular split)
 #Requires -Version 5.1
-$WG_KS_VERSION = '15.1'
+$WG_KS_VERSION = '15.2'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"

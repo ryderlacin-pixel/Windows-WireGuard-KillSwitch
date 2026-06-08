@@ -296,14 +296,4 @@ function Remove-IPv6FromConfig {
     } catch { WARN "IPv6 config strip failed: $_" }
 }
 
-function Disable-AllIPv6Bindings {
-    try {
-        $list = & netsh interface show interface 2>$null | Out-String
-        foreach ($line in ($list -split "`n")) {
-            if ($line -notmatch '^\s*Enabled\s+Connected') { continue }
-            $name = ($line -replace '^\s*\S+\s+\S+\s+\S+\s+', '').Trim()
-            if ([string]::IsNullOrWhiteSpace($name)) { continue }
-            & netsh interface ipv6 set interface "$name" disabled 2>$null | Out-Null
-        }
-    } catch {}
-}
+

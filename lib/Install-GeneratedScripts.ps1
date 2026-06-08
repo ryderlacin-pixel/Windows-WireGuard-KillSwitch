@@ -2,6 +2,9 @@
 #Requires -Version 5.1
 
 function Invoke-InstallGeneratedScripts {
+Invoke-DeployWgSafetyModule -Version $WG_KS_VERSION
+OK "wg-safety.ps1 runtime module deployed"
+
 Write-Step "STEP 7 - MONITOR SCRIPT"
 # ================================================================
 $monitorTunnelSvc  = $TUNNEL_SVC
@@ -27,6 +30,8 @@ $monitorContent = @"
 `$script:LastServerIP = ''
 `$script:ServerIPRefreshTick = 0
 `$PID_FILE = 'C:\WireGuard\monitor.pid'
+`$SAFETY_MOD = 'C:\WireGuard\wg-safety.ps1'
+if (Test-Path `$SAFETY_MOD) { . `$SAFETY_MOD }
 
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
@@ -96,19 +101,6 @@ function Test-Internet {
 
 function Test-SafeToOpen {
     return (Test-TunnelRunning) -and (Test-Internet)
-}
-
-function Test-BootGrace {
-    try {
-        `$reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name BootGraceUntil -EA SilentlyContinue
-        if (`$reg.BootGraceUntil -and (Get-Date) -lt [datetime]`$reg.BootGraceUntil) { return `$true }
-    } catch {}
-    return `$false
-}
-
-function Test-BlockAllowed {
-    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace) { return `$false }
-    return `$true
 }
 
 function Enable-DnsLeakProtection {
@@ -183,22 +175,9 @@ function Get-ResolvedServerIP {
 }
 
 function Enable-Block {
-    if (-not (Test-BlockAllowed)) {
-        Log "Block deferred (install/unbrick/boot-grace) - internet stays open"
-        return
+    if (Enable-KillSwitchBlock -ServerIPs `$script:SERVER_IP -ServerPort `$SERVER_PORT -LogPrefix '[MON]') {
+        Log "BLOCK active (server `$(`$script:SERVER_IP) allowed)"
     }
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>`$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>`$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>`$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          2>`$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out"     dir=out action=block interfacetype=lan         remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-RemoteAccess-Out" dir=out action=block interfacetype=remoteaccess remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall add rule name="KS-Block-PPP-Out"          dir=out action=block interfacetype=ppp          remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-    netsh advfirewall firewall delete rule name="KS-WARP-Server-Out" 2>`$null | Out-Null
-    netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=`$script:SERVER_IP remoteport=`$SERVER_PORT enable=yes | Out-Null
-    Enable-DnsLeakProtection
-    Log "BLOCK active (server `$(`$script:SERVER_IP) allowed)"
 }
 
 function Test-BlockRulePresent {
@@ -207,11 +186,7 @@ function Test-BlockRulePresent {
 }
 
 function Disable-Block {
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          | Out-Null
-    Disable-DnsLeakProtection
+    Disable-KillSwitchBlock
     Log "BLOCK removed - internet open"
 }
 
@@ -272,7 +247,7 @@ function Invoke-EmergencyUnbrick {
     New-Item -Path `$REG_KEY -Force | Out-Null
     Set-ItemProperty `$REG_KEY 'UnbrickUntil' (Get-Date).AddMinutes(10).ToString('o') -Force
     Remove-ItemProperty `$REG_KEY 'InstallInProgress' -EA SilentlyContinue
-    Set-ItemProperty `$REG_KEY 'BootGraceUntil' (Get-Date).AddSeconds(180).ToString('o') -Force
+    Set-ItemProperty `$REG_KEY 'BootGraceUntil' (Get-Date).AddSeconds(`$script:BOOT_GRACE_SEC).ToString('o') -Force
     return `$true
 }
 
@@ -319,6 +294,9 @@ try {
 
 Log "=== Monitor started (v$monitorKsVersion) ==="
 
+`$monitorFatal = `$null
+try {
+
 if (Test-InstallInProgress) {
     Disable-Block
     Log "Install in progress - waiting for install.ps1 to finish (internet open)"
@@ -330,12 +308,10 @@ if (Test-InstallInProgress) {
 }
 
 try {
-    `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
-    `$graceEnd = `$bootTime.AddSeconds(180)
-    if ((Get-Date) -lt `$graceEnd) {
-        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
-        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'BootGraceUntil' `$graceEnd.ToString('o') -Force
-        Log "Fresh boot - BootGrace until `$(`$graceEnd.ToString('HH:mm:ss')) (no block)"
+    `$graceEnd = Set-BootGraceFromUptime
+    if (`$graceEnd) {
+        Log "Fresh boot - BootGrace until `$(`$graceEnd.ToString('HH:mm:ss')) (uptime `$(Get-OsUptimeSeconds)s, no block)"
+        Disable-KillSwitchBlock
         Start-Sleep -Seconds 15
     }
 } catch {}
@@ -402,8 +378,12 @@ while (`$true) {
     if (`$wasOpen -and -not (Test-TunnelRunning)) {
         `$script:tunnelLostStreak++
         if (`$script:tunnelLostStreak -ge 5) {
-            Log "Tunnel lost (confirmed 5x/10s) - block"
-            Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
+            if (Test-BlockAllowed) {
+                Log "Tunnel lost (confirmed 5x/10s) - block"
+                Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
+            } else {
+                Log "Tunnel lost but block deferred (boot-safe/grace, uptime `$(Get-OsUptimeSeconds)s)"
+            }
             `$script:tunnelLostStreak = 0
         }
     } elseif (Test-TunnelRunning) { `$script:tunnelLostStreak = 0 }
@@ -504,6 +484,12 @@ while (`$true) {
         }
     }
 }
+
+} catch {
+    `$monitorFatal = `$_
+    Log "FATAL monitor error: `$monitorFatal"
+    if (`$script:EnableFailsafe) { Invoke-FailOpenSafeguard -Reason "monitor catch: `$monitorFatal" -LogPrefix '[MON]' }
+}
 "@
 $monitorContent | Set-Content $MONITOR_PS1 -Encoding UTF8 -Force
 try {
@@ -540,6 +526,9 @@ $LOCK         = "C:\WireGuard\repair.lock"
 `$REG_KEY     = 'HKLM:\SOFTWARE\WGKillSwitch'
 `$SERVER_PORT = '$repairServerPort'
 "@ + @'
+
+$SAFETY_MOD = 'C:\WireGuard\wg-safety.ps1'
+if (Test-Path $SAFETY_MOD) { . $SAFETY_MOD }
 
 $ErrorActionPreference = "SilentlyContinue"
 
@@ -606,19 +595,6 @@ function Test-Internet {
 }
 
 function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
-
-function Test-BootGrace {
-    try {
-        $reg = Get-ItemProperty $REG_KEY -Name BootGraceUntil -EA SilentlyContinue
-        if ($reg.BootGraceUntil -and (Get-Date) -lt [datetime]$reg.BootGraceUntil) { return $true }
-    } catch {}
-    return $false
-}
-
-function Test-BlockAllowed {
-    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace) { return $false }
-    return $true
-}
 
 function Enable-DnsLeakProtection {
     netsh advfirewall firewall set rule name="KS-DNS-Block" new enable=yes 2>$null | Out-Null
@@ -747,11 +723,7 @@ function Get-RepairServerIP {
 }
 
 function Disable-Block {
-    netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-RemoteAccess-Out" 2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="KS-Block-PPP-Out"          2>$null | Out-Null
-    Disable-DnsLeakProtection
+    Disable-KillSwitchBlock
 }
 
 function Sync-KillSwitchState {
@@ -985,6 +957,8 @@ Write-Step "STEP 8b - INTERNET WATCHDOG SCRIPT"
 $watchdogKsVersion = $WG_KS_VERSION
 $watchdogContent = @"
 # Internet Watchdog v$watchdogKsVersion (graduated fail-open - never tears down protection)
+`$SAFETY_MOD = 'C:\WireGuard\wg-safety.ps1'
+if (Test-Path `$SAFETY_MOD) { . `$SAFETY_MOD }
 `$LOG = '$LOG'
 `$REG_KEY = 'HKLM:\SOFTWARE\WGKillSwitch'
 `$INSTALL_LOCK = '$INSTALL_LOCK'
@@ -1042,23 +1016,15 @@ function Test-BlockRulePresent {
     return (`$o -match 'Enabled:\s+Yes')
 }
 function Invoke-GentleUnbrick {
-    foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
-        netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
-    }
-    netsh advfirewall firewall set rule name="KS-DNS-Block" new enable=no 2>`$null | Out-Null
-    netsh advfirewall firewall set rule name="KS-DNS-Block-TCP" new enable=no 2>`$null | Out-Null
+    Disable-KillSwitchBlock
     Clear-DnsClientCache -EA SilentlyContinue
 }
 function Invoke-DeepUnbrick {
-    Invoke-GentleUnbrick
+    Invoke-FailOpenSafeguard -Reason 'watchdog deep unbrick' -LogPrefix '[WATCHDOG]'
     Remove-Item `$INSTALL_LOCK -Force -EA SilentlyContinue
-    New-Item -Path `$REG_KEY -Force | Out-Null
-    Set-ItemProperty `$REG_KEY 'UnbrickUntil' (Get-Date).AddMinutes(10).ToString('o') -Force
-    Remove-ItemProperty `$REG_KEY 'InstallInProgress' -EA SilentlyContinue
-    Set-ItemProperty `$REG_KEY 'BootGraceUntil' (Get-Date).AddSeconds(180).ToString('o') -Force
 }
 
-if (Test-HoldActive) { exit 0 }
+if (Test-HoldActive -or (Test-BootSafeWindow)) { exit 0 }
 
 `$tcpOK = Test-Internet
 `$tunnel = Test-TunnelRunning
@@ -1211,6 +1177,11 @@ function RepairCooldownActive {
     } catch { return $false }
 }
 function Test-HoldActive {
+    $safety = 'C:\WireGuard\wg-safety.ps1'
+    if (Test-Path $safety) {
+        . $safety
+        if (Test-UnbrickActive -or Test-BootGrace -or (Test-BootSafeWindow)) { return $true }
+    }
     try {
         $reg = Get-ItemProperty $REG_KEY -EA SilentlyContinue
         if ($reg.UnbrickUntil -and (Get-Date) -lt [datetime]$reg.UnbrickUntil) { return $true }

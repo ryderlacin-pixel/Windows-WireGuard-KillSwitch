@@ -64,6 +64,7 @@ try {
 
 New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       $WG_KS_VERSION                      -Force
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "EnableFailsafe" ([int]$script:EnableFailsafe) -Type DWord -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "ScriptsPath"  (Join-Path $PSScriptRoot 'scripts')   -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "TunnelName"   $TUNNEL_NAME                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
@@ -151,6 +152,8 @@ $gpoContent = @"
 `$TUNNEL_SVC = '$gpoTunnelSvc'
 `$TUNNEL_NAME = '$gpoTunnelName'
 `$REG_KEY    = 'HKLM:\SOFTWARE\WGKillSwitch'
+`$SAFETY_MOD = 'C:\WireGuard\wg-safety.ps1'
+if (Test-Path `$SAFETY_MOD) { . `$SAFETY_MOD }
 `$ErrorActionPreference = 'SilentlyContinue'
 function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
     try { return `$Mutex.WaitOne(`$TimeoutMs) }
@@ -163,20 +166,6 @@ function Log(`$m) {
         if (-not (Wait-NamedMutex `$mutex 2000)) { return }
         Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [GPO] `$m" -Encoding UTF8 -EA SilentlyContinue
     } finally { if (`$mutex) { try { `$mutex.ReleaseMutex() } catch {} } }
-}
-function Test-BootGrace {
-    try {
-        `$reg = Get-ItemProperty `$REG_KEY -Name BootGraceUntil -EA SilentlyContinue
-        if (`$reg.BootGraceUntil -and (Get-Date) -lt [datetime]`$reg.BootGraceUntil) { return `$true }
-    } catch {}
-    return `$false
-}
-function Test-UnbrickActive {
-    try {
-        `$reg = Get-ItemProperty `$REG_KEY -Name UnbrickUntil -EA SilentlyContinue
-        if (`$reg.UnbrickUntil -and (Get-Date) -lt [datetime]`$reg.UnbrickUntil) { return `$true }
-    } catch {}
-    return `$false
 }
 function Test-TunnelAdapterUp {
     for (`$try = 0; `$try -lt 3; `$try++) {
@@ -224,18 +213,14 @@ function Start-HiddenScript([string]`$ScriptPath) {
 }
 Log "GPO boot script fired (v$gpoKsVersion)"
 try {
-    `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
-    `$graceEnd = `$bootTime.AddSeconds(180)
-    if ((Get-Date) -lt `$graceEnd) {
-        New-Item -Path `$REG_KEY -Force | Out-Null
-        Set-ItemProperty `$REG_KEY 'BootGraceUntil' `$graceEnd.ToString('o') -Force
-        Log "GPO: BootGrace until `$(`$graceEnd.ToString('HH:mm:ss')) (fail-open)"
-    }
+    `$graceEnd = Set-BootGraceFromUptime
+    if (`$graceEnd) { Log "GPO: BootGrace until `$(`$graceEnd.ToString('HH:mm:ss')) (uptime `$(Get-OsUptimeSeconds)s, fail-open)" }
 } catch {}
+Disable-KillSwitchBlock
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 & sc.exe config `$TUNNEL_SVC start= delayed-auto 2>`$null | Out-Null
-if (Test-UnbrickActive -or Test-BootGrace) {
-    Log "GPO: fail-open hold - repair only (no block authority)"
+if (Test-UnbrickActive -or Test-BootGrace -or (Test-BootSafeWindow)) {
+    Log "GPO: fail-open hold - blocks cleared, repair only (no block authority)"
 } else {
     `$waited = 0
     while (`$waited -lt 120 -and -not (Test-SafeToOpen)) {

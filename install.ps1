@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.1)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
@@ -9,6 +9,7 @@
 # - Self-healing: WMI Permanent Event Subscription respawns monitor if killed.
 # - Install-safe: install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade.
 # - Internet opens only when tunnel RUNNING and Test-Internet passes (zombie-tunnel prevention).
+# - v15.2: boot-safe window (90s), DHCP/gateway exemptions, tunnel-only IPv6 bind, fail-open + DryRun.
 # - v15.1: lib/ modular split; WARP-first docs; one-step Hassas-Tarama; optional CI live-smoke.
 # - v11.3: anti-tamper guard; v11.2: WG-RebootVerify; v11.1: monitor singleton hardening.
 # - v15.0: DNS lock, network privacy, strict dnscrypt, leak-sentinel v15, sensitive-mode.
@@ -26,13 +27,18 @@ param(
     [switch]$TorUpgradeOnly,
     [switch]$FullPrivacyUpgrade,
     [switch]$StrongPrivacyUpgrade,
+    [switch]$DryRun,
+    [bool]$EnableFailsafe = $true,
     [switch]$NoPause
 )
 $ErrorActionPreference = "Continue"
+$script:InstallDryRun = $DryRun.IsPresent
+$script:EnableFailsafe = $EnableFailsafe
 
 $LibRoot = Join-Path $PSScriptRoot 'lib'
 $LibModules = @(
     'Install-Constants.ps1',
+    'Install-SafeNetwork.ps1',
     'Install-Helpers.ps1',
     'Install-Privacy.ps1',
     'Install-UpgradePaths.ps1',
@@ -45,7 +51,7 @@ foreach ($mod in $LibModules) {
     $modPath = Join-Path $LibRoot $mod
     if (-not (Test-Path $modPath)) {
         Write-Host " [ERR]  Missing lib module: $mod" -ForegroundColor Red
-        Write-Host "        Re-clone the repo or restore lib/ from v15.1." -ForegroundColor Gray
+        Write-Host "        Re-clone the repo or restore lib/ from v15.2." -ForegroundColor Gray
         if (-not $NoPause) { pause }
         exit 1
     }
@@ -64,9 +70,28 @@ if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     exit 1
 }
 
+if ($DryRun) {
+    Write-Host "`n [DRY-RUN] Active - no firewall rules or adapter bindings will be changed." -ForegroundColor Yellow
+    Write-Host "           Simulation logs only. Re-run without -DryRun to apply." -ForegroundColor Gray
+}
+
 if (Invoke-InstallUpgradeEarlyExit) { exit 0 }
 
+try {
 Invoke-InstallMainSteps0to6
 Invoke-InstallGeneratedScripts
 Invoke-InstallTasksAndWmi
 Invoke-InstallMainSteps18to20
+} catch {
+    Write-Err "Install fatal: $_"
+    if ($EnableFailsafe) {
+        Write-Host " [SAFE] EnableFailsafe: opening internet (fail-open)" -ForegroundColor Yellow
+        if (Get-Command Invoke-FailOpenSafeguard -ErrorAction SilentlyContinue) {
+            Invoke-FailOpenSafeguard -Reason ('install.ps1 catch: ' + $_.Exception.Message) -LogPrefix '[INSTALL]'
+        } elseif (Get-Command Remove-InstallBlocks -ErrorAction SilentlyContinue) {
+            Remove-InstallBlocks
+        }
+    }
+    if (-not $NoPause) { pause }
+    exit 1
+}

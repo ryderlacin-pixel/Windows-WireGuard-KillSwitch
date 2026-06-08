@@ -225,7 +225,8 @@ Write-Info "Legacy shells skipped (install lock active; old tasks removed)"
 $allRules = @(
     "KS-Block-WiFi-Out","KS-Block-Ethernet-Out","KS-Block-RemoteAccess-Out","KS-Block-PPP-Out",
     "KS-Block-IPv6-Out","KS-Block-IPv6-In",
-    "KS-LAN-Out","KS-LAN-In","KS-DHCP-Out","KS-DHCP-In",
+    "KS-LAN-Out","KS-LAN-In","KS-DHCP-Out","KS-DHCP-In","KS-DHCP-Bcast-Out","KS-DHCP-Server-In",
+    "KS-Gateway-Out","KS-Gateway-In",
     "KS-WARP-Server-Out","KS-Loopback-Out","KS-Loopback-In",
     "KS-DNS-Allow","KS-DNS-Block","KS-DNS-Block-TCP","KS-WireGuard-EXE","KS-Dnscrypt-EXE","KS-WireGuard-Tunnel-SVC",
     "KS - ENGEL Wi-Fi Cikis","KS - ENGEL Ethernet Cikis","KS - ENGEL IPv6 Cikis","KS - ENGEL IPv6 Giris",
@@ -255,8 +256,8 @@ foreach ($pfx in @('fe80::/10','::1/128','fc00::/7')) {
     netsh advfirewall firewall add rule name="KS-Block-IPv6-Out" dir=out action=block remoteip=$pfx enable=yes 2>$null | Out-Null
     netsh advfirewall firewall add rule name="KS-Block-IPv6-In"  dir=in  action=block remoteip=$pfx enable=yes 2>$null | Out-Null
 }
-Write-Info "Disabling IPv6 bindings (timeout 45s)..."
-Disable-AllIPv6Bindings
+Write-Info "Disabling IPv6 on tunnel adapters only (physical NICs protected)..."
+Disable-TunnelIPv6BindingsOnly
 
 $ipv6RegParams = @{
     Path        = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters"
@@ -282,26 +283,23 @@ Write-Step "STEP 6 - FIREWALL RULES"
 # Server IPs pre-cached in STEP 2b (no network call during install body)
 
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
-netsh advfirewall firewall add rule name="KS-Block-WiFi-Out"         dir=out action=block interfacetype=wireless     remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-Block-Ethernet-Out"     dir=out action=block interfacetype=lan         remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-Block-RemoteAccess-Out" dir=out action=block interfacetype=remoteaccess remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-Block-PPP-Out"          dir=out action=block interfacetype=ppp          remoteip=0.0.0.0/1,128.0.0.0/1 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-LAN-Out"   dir=out action=allow remoteip=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-LAN-In"    dir=in  action=allow remoteip=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-DHCP-Out"  dir=out action=allow protocol=UDP localport=68 remoteport=67 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-DHCP-In"   dir=in  action=allow protocol=UDP localport=68 remoteport=67 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-Loopback-Out" dir=out action=allow remoteip=127.0.0.0/8 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-Loopback-In"  dir=in  action=allow remoteip=127.0.0.0/8 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-DNS-Allow"     dir=out action=allow protocol=UDP remoteip=1.1.1.1,1.0.0.1 remoteport=53 enable=yes | Out-Null
-netsh advfirewall firewall add rule name="KS-DNS-Block"     dir=out action=block protocol=UDP remoteport=53 enable=no | Out-Null
-netsh advfirewall firewall add rule name="KS-DNS-Block-TCP" dir=out action=block protocol=TCP remoteport=53 enable=no | Out-Null
-netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes | Out-Null
+Write-Info "Applying DHCP/gateway/LAN exemptions BEFORE catch-all blocks..."
+Add-KillSwitchFirewallExemptions -ServerIPs $serverIPs -ServerPort $serverPort
+Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-Loopback-Out" dir=out action=allow remoteip=127.0.0.0/8 enable=yes' 'loopback out'
+Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-Loopback-In" dir=in action=allow remoteip=127.0.0.0/8 enable=yes' 'loopback in'
+Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-DNS-Allow" dir=out action=allow protocol=UDP remoteip=1.1.1.1,1.0.0.1 remoteport=53 enable=yes' 'DNS allow'
+Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-DNS-Block" dir=out action=block protocol=UDP remoteport=53 enable=no' 'DNS block (disabled until healthy)'
+Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-DNS-Block-TCP" dir=out action=block protocol=TCP remoteport=53 enable=no' 'DNS TCP block'
+Invoke-SafeNetsh 'netsh advfirewall firewall add rule name="KS-WireGuard-EXE" dir=out action=allow program="C:\Program Files\WireGuard\wireguard.exe" enable=yes' 'WireGuard EXE'
 if (Test-Path $DNSCRYPT_EXE) {
-    netsh advfirewall firewall add rule name="KS-Dnscrypt-EXE" dir=out action=allow program="$DNSCRYPT_EXE" enable=yes | Out-Null
+    Invoke-SafeNetsh "netsh advfirewall firewall add rule name=`"KS-Dnscrypt-EXE`" dir=out action=allow program=`"$DNSCRYPT_EXE`" enable=yes" 'dnscrypt EXE'
 }
-
 Write-Info "Server IPs: $serverIPs"
-netsh advfirewall firewall add rule name="KS-WARP-Server-Out" dir=out action=allow protocol=UDP remoteip=$serverIPs remoteport=$serverPort enable=yes | Out-Null
+if (-not $script:InstallDryRun) {
+    Add-KillSwitchCatchAllBlocks
+} else {
+    Write-SafeActionLog 'Would add catch-all KS-Block-* rules (deferred until tunnel healthy)'
+}
 OK "Firewall rules applied"
 
 # Install lock: never leave outbound blocks on during install (agent/remote needs internet)

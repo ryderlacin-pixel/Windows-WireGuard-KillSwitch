@@ -10,8 +10,8 @@
   # Or uses git credential manager PAT if GITHUB_TOKEN unset:
   .\scripts\publish-releases.ps1
 
-  # Create only v15.1:
-  .\scripts\publish-releases.ps1 -Only v15.1
+  # Create only v15.2:
+  .\scripts\publish-releases.ps1 -Only v15.2
 #>
 param(
     [string]$Token = $env:GITHUB_TOKEN,
@@ -82,6 +82,7 @@ $releases = @{
     "v11.2" = @{ name = "v11.2 - Post-reboot auto-verify (production)" }
     "v15.0" = @{ name = "v15.0 - Strong Privacy Stack (DNS lock, network hardening, leak-sentinel v15)" }
     "v15.1" = @{ name = "v15.1 - Quality 95+ (lib modules, WARP-first docs, one-step Tor)" }
+    "v15.2" = @{ name = "v15.2 - Boot-safety emergency fix (90s window, DHCP exempt, emergency-reset)" }
 }
 
 function Get-ReleaseBody($tag) {
@@ -120,7 +121,7 @@ function Publish-Release($tag, $name, $body) {
 }
 
 Write-Host "=== Publish GitHub Releases ===" -ForegroundColor Cyan
-$toPublish = if ($Only) { @($Only) } else { @("v15.0", "v15.1") }
+$toPublish = if ($Only) { @($Only) } else { @("v15.2") }
 
 foreach ($tag in $toPublish) {
     if (-not $releases.ContainsKey($tag)) {

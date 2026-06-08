@@ -7,19 +7,21 @@
 ![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
 ![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
 
-> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Strong privacy (v15.1).**
+> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Boot-safe (v15.2). Strong privacy (v15).**
 
-Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1).
+Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1+).
 
-**v15.1** is the current production release.
+**v15.2** is the current production release (boot-safety patch — see [post-mortem](docs/releases/v15.2.md)).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.1](docs/releases/v15.1.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.2](docs/releases/v15.2.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
 
-**Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
+**Internet stuck?** Run **`emergency-reset.bat`** as Administrator (repo root or `C:\WireGuard\`) — removes `KS-*` rules, resets firewall/IP stack, re-enables physical adapters. Then wait 1–5 minutes for `WG-InternetWatchdog`, or re-run `install.ps1`.
+
+**First install on a real PC?** Test in a **VM** first: `.\install.ps1 -DryRun` (no network changes), then full VM install + reboot before physical hardware.
 
 **CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse `install.ps1` + `lib/*.ps1` + scripts, **164+ offline assertions** (×3 in `run-all-tests.ps1`), mutex tests (no WireGuard/admin required).
 
@@ -62,12 +64,14 @@ flowchart TB
   monitor -->|"tunnel up"| open["Open Internet"]
 ```
 
-### Repository layout (v15.1)
+### Repository layout (v15.2)
 
 | Path | Purpose |
 |------|---------|
-| [`install.ps1`](install.ps1) | Entry point (~70 lines): dot-sources `lib/`, runs install or upgrade flags |
-| [`lib/Install-Constants.ps1`](lib/Install-Constants.ps1) | Paths, service names, version `15.1` |
+| [`install.ps1`](install.ps1) | Entry point: dot-sources `lib/`, `-DryRun`, `-EnableFailsafe` |
+| [`emergency-reset.bat`](emergency-reset.bat) | One-click admin recovery if network is locked |
+| [`lib/Install-Constants.ps1`](lib/Install-Constants.ps1) | Paths, service names, version `15.2` |
+| [`lib/Install-SafeNetwork.ps1`](lib/Install-SafeNetwork.ps1) | Boot-safe window, DHCP/gateway exemptions, NIC whitelist, fail-open |
 | [`lib/Install-Helpers.ps1`](lib/Install-Helpers.ps1) | Logging, mutex, Test-Internet, tunnel/WMI helpers |
 | [`lib/Install-Privacy.ps1`](lib/Install-Privacy.ps1) | Browser/telemetry policies, integrity vault |
 | [`lib/Install-UpgradePaths.ps1`](lib/Install-UpgradePaths.ps1) | `-StrongPrivacyUpgrade` and phased upgrades |
@@ -165,8 +169,15 @@ This project separates **leak protection** (always-on with `.\install.ps1`) from
 #    OR open an elevated PowerShell and run:
 
 Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1 -DryRun   # optional: simulate first (no firewall/NIC changes)
 .\install.ps1
 ```
+
+| Switch | Description |
+|--------|-------------|
+| `-DryRun` | Log what would happen; **no** firewall rules or adapter binding changes |
+| `-EnableFailsafe` | Default `$true` — on install fatal error, fail-open instead of bricking |
+| `-NoPause` | Skip `pause` at end (automation/CI) |
 
 That's it. No manual WireGuard setup. No account creation. Fully automated.
 
@@ -214,13 +225,13 @@ Custom settings are baked into generated `monitor.ps1`, `repair.ps1`, and GPO sc
 | VPN tunnel **running** | All internet traffic flows normally through the tunnel |
 | VPN tunnel **drops** | Internet is **immediately blocked** via firewall rules |
 | VPN **recovers** | Internet is automatically unblocked, DNS cache flushed |
-| System **reboots** | Kill switch activates before any traffic can leak |
+| System **reboots** | **90s boot-safe window** — no catch-all block until DHCP + tunnel can start; then normal protection |
 
 ### Firewall rules applied
 
 - `KS-Block-WiFi-Out` / `KS-Block-Ethernet-Out` — blocks all outbound traffic on real adapters
 - `KS-LAN-*` — allows local network (192.168.x.x, 10.x.x.x, 172.16.x.x)
-- `KS-DHCP-*` — allows DHCP so the adapter can get an IP
+- `KS-DHCP-*` / `KS-DHCP-Bcast-Out` / `KS-Gateway-*` — DHCP (UDP 67/68) and gateway subnet **before** catch-all blocks
 - `KS-DNS-Allow` — allows DNS only to 1.1.1.1 and 1.0.0.1
 - `KS-DNS-Block` — blocks all other DNS (prevents leaks)
 - `KS-WARP-Server-Out` — allows UDP to VPN server endpoints (WARP or custom) so the tunnel can reconnect
@@ -264,7 +275,9 @@ Installed by `install.ps1` (orchestrator + `lib/`). Nothing manual after first r
 | `nssm.exe` | Service manager |
 | `wgcf.exe` | WARP config generator (WARP mode only) |
 | `WG-KillSwitch-backup.xml` | Task backup for self-repair |
-| `sensitive-mode.ps1` | One-step Hassas-Tarama launcher (v15.1) |
+| `wg-safety.ps1` | Runtime boot-safety module (v15.2) |
+| `emergency-reset.bat` / `emergency-reset.ps1` | One-click network recovery (v15.2) |
+| `sensitive-mode.ps1` | One-step Hassas-Tarama launcher (v15.1+) |
 | `ensure-tor-sensitive.ps1` | Auto-install + harden Tor if missing |
 | `dns-lockdown-guard.ps1` | System DNS → 127.0.0.1 (v15) |
 | `dnscrypt-guard.ps1` | dnscrypt-proxy health (v14+) |
@@ -357,11 +370,19 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v15.1 (production — current)
+### v15.2 (production — current)
+- **Boot-safe window (90s)** — no catch-all firewall block during early boot; fixes v15.1 reboot deadlock
+- **DHCP/gateway exemptions** — UDP 67/68 + gateway subnet written before `KS-Block-*`
+- **Physical NIC shield** — IPv6 binding disable only on WireGuard/wintun/AllDebrid virtual adapters
+- **`emergency-reset.bat`** — one-click admin recovery (firewall reset + re-enable physical NICs)
+- **`-DryRun`** and **`$EnableFailsafe`** — simulation mode + automatic fail-open on fatal errors
+- **`lib/Install-SafeNetwork.ps1`** + runtime `wg-safety.ps1`
+- See **[docs/releases/v15.2.md](docs/releases/v15.2.md)** (includes post-mortem)
+
+### v15.1
 - **`lib/` modular install** — same `.\install.ps1` entry point; 8 dot-sourced modules
 - **WARP-first docs** — free default; paid VPN optional; Tor for sensitive sessions only
 - **One-step Hassas-Tarama** — `ensure-tor-sensitive.ps1` auto-installs Tor if missing
-- **Optional CI live-smoke** — `live-smoke-test.ps1` (SKIP-safe on GitHub runners)
 - See **[docs/releases/v15.1.md](docs/releases/v15.1.md)**
 
 ### v15.0

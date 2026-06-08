@@ -77,12 +77,13 @@ Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
 # ================================================================
 Ensure-TunnelForInstall | Out-Null
 Ensure-DelayedAutoStart
-Disable-AllIPv6Bindings
+Disable-TunnelIPv6BindingsOnly
 Remove-KurtarArtifacts
 New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
-Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'BootGraceUntil' (Get-Date).AddSeconds(180).ToString('o') -Force
+Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'EnableFailsafe' ([int]$script:EnableFailsafe) -Type DWord -Force
+Set-BootGraceRegistry -Seconds $script:BOOT_GRACE_SEC
 Clear-InstallLock
-OK "Install lock cleared - 180s BootGrace (fail-open), then monitor takes over"
+OK "Install lock cleared - $($script:BOOT_GRACE_SEC)s BootGrace (fail-open), then monitor takes over"
 if (Test-Path $NSSM) {
     & $NSSM start $WG_SVC_NAME 2>$null | Out-Null
     Start-Sleep 3
@@ -102,6 +103,18 @@ if (-not (Test-SafeToOpen)) {
 } else {
     OK "Tunnel + internet OK - monitor taking over"
 }
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$emerBat = Join-Path $repoRoot 'emergency-reset.bat'
+$emerPs1 = Join-Path $repoRoot 'scripts\emergency-reset.ps1'
+if (Test-Path $emerPs1) {
+    Copy-Item $emerPs1 "$INSTALL_DIR\emergency-reset.ps1" -Force
+    OK "emergency-reset.ps1 deployed to $INSTALL_DIR"
+}
+if (Test-Path $emerBat) {
+    Copy-Item $emerBat "$INSTALL_DIR\emergency-reset.bat" -Force
+    OK "emergency-reset.bat deployed to $INSTALL_DIR"
+}
+
 Write-GuardBackups
 Install-ScriptIntegrityVault
 OK "Guard vault refreshed (final script versions)"
