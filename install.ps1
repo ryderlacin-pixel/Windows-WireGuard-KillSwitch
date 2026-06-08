@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v11.3)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v11.4)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,8 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v11.4: tunnel reinstall mutex shared by monitor/repair/kurtar; repair defers to active monitor;
+#   SVC stops spawning repair every 5s during monitor recovery (fixes concurrent reinstall brick).
 # - v11.3: anti-tamper guard — silent restore when tasks/scripts/firewall/WMI/service deleted.
 # - v11.2: post-reboot auto-verify task (WG-RebootVerify, 5min after boot).
 # - v11.1: monitor singleton hardening — single launcher, periodic dedupe, stale PID cleanup.
@@ -77,6 +79,7 @@ $GPO_INI_DIR  = "C:\Windows\System32\GroupPolicy\Machine\Scripts"
 $GPO_INI      = "$GPO_INI_DIR\scripts.ini"
 $INSTALL_LOCK = "$INSTALL_DIR\install.inprogress"
 $KURTAR_PS1   = "$INSTALL_DIR\kurtar.ps1"
+$KURTAR2_PS1  = "$INSTALL_DIR\kurtar2.ps1"
 $KURTAR_BAT   = "$INSTALL_DIR\kurtar.bat"
 $GUARD_DIR    = 'C:\ProgramData\WGKillSwitchGuard'
 $ANTI_TAMPER_PS1 = "$INSTALL_DIR\anti-tamper.ps1"
@@ -333,7 +336,7 @@ function Install-WmiSubscription {
 function Write-KurtarScript {
     $kurtarTunnelSvc = $TUNNEL_SVC
     $kurtarContent = @"
-# WG Kill Switch - KURTAR (emergency restore, works 100% offline)
+# WG Kill Switch - KURTAR v11.4 (emergency restore, works 100% offline)
 #Requires -RunAsAdministrator
 `$TUNNEL_SVC  = '$kurtarTunnelSvc'
 `$TUNNEL_NAME = '$TUNNEL_NAME'
@@ -342,29 +345,62 @@ function Write-KurtarScript {
 `$INSTALL_LOCK = '$INSTALL_LOCK'
 `$LOG         = '$LOG'
 `$ErrorActionPreference = 'Continue'
-Write-Host '=== WG KURTAR (emergency restore) ===' -ForegroundColor Cyan
+
+function Wait-NamedMutex([System.Threading.Mutex]`$Mutex, [int]`$TimeoutMs) {
+    try { return `$Mutex.WaitOne(`$TimeoutMs) }
+    catch [System.Threading.AbandonedMutexException] { return `$true }
+}
+
+function Try-ReinstallTunnel {
+    `$mux = `$null
+    try {
+        `$mux = New-Object System.Threading.Mutex(`$false, 'Global\WGTunnelInstallMutex')
+        if (-not (Wait-NamedMutex `$mux 120000)) {
+            Write-Host '[!!] Tunnel mutex timeout' -ForegroundColor Yellow
+            return (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
+        }
+        Get-Process -Name 'wireguard' -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
+        `$wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='`$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
+        if (`$wgSvcPid -and `$wgSvcPid -gt 0) { Stop-Process -Id `$wgSvcPid -Force -EA SilentlyContinue }
+        Start-Sleep -Seconds 2
+        & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
+        Start-Sleep -Seconds 4
+        & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
+        Start-Sleep -Seconds 12
+        return (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
+    } finally {
+        if (`$mux) { try { `$mux.ReleaseMutex() } catch {} }
+    }
+}
+
+Write-Host '=== WG KURTAR v11.4 (emergency restore) ===' -ForegroundColor Cyan
 foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
     netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
 }
 netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound 2>`$null | Out-Null
 Remove-Item `$INSTALL_LOCK -Force -EA SilentlyContinue
 Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
+Clear-DnsClientCache -EA SilentlyContinue
 if (-not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
-    Write-Host '[-->] Tunnel down - reinstalling...' -ForegroundColor Yellow
+    Write-Host '[-->] Tunnel down - reinstalling (mutex)...' -ForegroundColor Yellow
     if ((Test-Path `$WG_EXE) -and (Test-Path `$CONFIG)) {
-        & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null | Out-Null
-        Start-Sleep 2
-        & `$WG_EXE /installtunnelservice `$CONFIG 2>`$null | Out-Null
-        Start-Sleep 5
+        `$ok = Try-ReinstallTunnel
+        if (-not `$ok) {
+            Write-Host '[-->] First attempt failed - retrying...' -ForegroundColor Yellow
+            Start-Sleep -Seconds 5
+            `$ok = Try-ReinstallTunnel
+        }
     }
 }
 `$running = (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
-Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR] Emergency restore - tunnel=`$running" -Encoding UTF8 -EA SilentlyContinue
+Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [KURTAR] Emergency restore v11.4 - tunnel=`$running" -Encoding UTF8 -EA SilentlyContinue
 Write-Host "[OK] Internet restored (tunnel=`$running)" -ForegroundColor Green
 Write-Host "     Re-run install.ps1 when ready to re-apply kill switch." -ForegroundColor Gray
 "@
     Set-Content $KURTAR_PS1 $kurtarContent -Encoding UTF8 -Force
+    Copy-Item $KURTAR_PS1 $KURTAR2_PS1 -Force
     attrib -H -S $KURTAR_PS1 2>$null | Out-Null
+    attrib -H -S $KURTAR2_PS1 2>$null | Out-Null
     @"
 @echo off
 title WireGuard Kill Switch - KURTAR
@@ -376,7 +412,7 @@ echo.
 pause
 "@ | Set-Content $KURTAR_BAT -Encoding ASCII -Force
     attrib -H -S $KURTAR_BAT 2>$null | Out-Null
-    OK "Emergency rescue: $KURTAR_BAT"
+    OK "Emergency rescue: $KURTAR_BAT + $KURTAR2_PS1"
 }
 
 function Update-GpoScriptsIni($iniPath, $scriptPath) {
@@ -446,7 +482,7 @@ function Write-GuardBackups {
     Get-ChildItem $GUARD_DIR -File -EA SilentlyContinue | ForEach-Object { attrib +H +S $_.FullName 2>$null | Out-Null }
 
     New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'Version' '11.3' -Force
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'Version' '11.4' -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GuardDir' $GUARD_DIR -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'StartupLnk' $STARTUP_LNK -Force
     Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'GpoScript' $GPO_SCRIPT -Force
@@ -828,7 +864,7 @@ $monitorPort       = $serverPort
 $monitorCustomMode = if ($CUSTOM_MODE) { '$true' } else { '$false' }
 
 $monitorContent = @"
-# WireGuard Kill Switch - Monitor v11.3 (auto-generated by install.ps1)
+# WireGuard Kill Switch - Monitor v11.4 (auto-generated by install.ps1)
 `$TUNNEL_SVC   = '$monitorTunnelSvc'
 `$TUNNEL_NAME  = '$monitorTunnelName'
 `$CONFIG       = '$monitorConfig'
@@ -1057,7 +1093,7 @@ try {
     exit 1
 }
 
-Log "=== Monitor started (v11.3) ==="
+Log "=== Monitor started (v11.4) ==="
 
 if (Test-InstallInProgress) {
     Disable-Block
@@ -1177,8 +1213,7 @@ while (`$true) {
                 } else {
                     Log "Attempt `$i - tunnel up but no internet after 30s, retrying"
                     Enable-Block; `$state = 'blocked'
-                    & `$WG_EXE /uninstalltunnelservice `$TUNNEL_NAME 2>`$null
-                    Start-Sleep -Seconds 3
+                    Try-ReinstallTunnel | Out-Null
                 }
             } else {
                 Log "Attempt `$i - tunnel did not start"
@@ -1187,6 +1222,9 @@ while (`$true) {
         }
         if (-not `$success) {
             Log "CRITICAL: 5 attempts failed (total: `$totalAttempts) - holding block 60s then retrying"
+            if (`$totalAttempts -ge 15 -and (`$totalAttempts % 15) -eq 0) {
+                Log "STUCK: run C:\WireGuard\kurtar.bat for emergency restore"
+            }
             Enable-Block; `$state = 'blocked'
             `$waited = 0
             while (`$waited -lt 60) {
@@ -1411,6 +1449,57 @@ function Sync-KillSwitchState {
     }
 }
 
+function IsMainMonitor([string]$cmd) {
+    if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
+    return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
+}
+
+function GetMonitorShellProcs() {
+    $found = @()
+    foreach ($shell in @('powershell', 'pwsh')) {
+        Get-Process $shell -EA SilentlyContinue | ForEach-Object {
+            try {
+                $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
+                if (IsMainMonitor $c) { $found += $_ }
+            } catch {}
+        }
+    }
+    return $found
+}
+
+function Test-MainMonitorActive {
+    $pidFile = 'C:\WireGuard\monitor.pid'
+    if (Test-Path $pidFile) {
+        try {
+            $mpid = [int](Get-Content $pidFile -EA Stop | Select-Object -First 1)
+            if ($mpid -gt 0 -and (Get-Process -Id $mpid -EA SilentlyContinue)) { return $true }
+        } catch {}
+    }
+    return ((GetMonitorShellProcs | Measure-Object).Count -gt 0)
+}
+
+function Try-ReinstallTunnel {
+    $mux = $null
+    try {
+        $mux = New-Object System.Threading.Mutex($false, 'Global\WGTunnelInstallMutex')
+        if (-not (Wait-NamedMutex $mux 90000)) {
+            Log "TunnelReinstall: mutex timeout"
+            return (Test-TunnelRunning)
+        }
+        Get-Process -Name "wireguard" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
+        $wgSvcPid = (Get-CimInstance Win32_Service -Filter "Name='$TUNNEL_SVC'" -EA SilentlyContinue).ProcessId
+        if ($wgSvcPid -and $wgSvcPid -gt 0) { Stop-Process -Id $wgSvcPid -Force -EA SilentlyContinue }
+        Start-Sleep -Seconds 2
+        & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
+        Start-Sleep -Seconds 4
+        & $WG_EXE /installtunnelservice $CONFIG 2>$null | Out-Null
+        Start-Sleep -Seconds 12
+        return (Test-TunnelRunning)
+    } finally {
+        if ($mux) { try { $mux.ReleaseMutex() } catch {} }
+    }
+}
+
 function Get-PreferredShell {
     $pwshPath = "${env:ProgramFiles}\PowerShell\7\pwsh.exe"
     if (Test-Path $pwshPath) { return $pwshPath }
@@ -1481,17 +1570,16 @@ try {
     }
 
     if ((& sc.exe query $TUNNEL_SVC 2>$null) -notmatch "RUNNING") {
-        Log "Tunnel not running - reinstalling"
-        if ((Test-Path $WG_EXE) -and (Test-Path $CONFIG)) {
-            & $WG_EXE /uninstalltunnelservice $TUNNEL_NAME 2>$null | Out-Null
-            Start-Sleep 2
-            & $WG_EXE /installtunnelservice $CONFIG 2>$null | Out-Null
-            Start-Sleep 8
-            if ((& sc.exe query $TUNNEL_SVC 2>$null) -match "RUNNING") {
+        if (Test-MainMonitorActive) {
+            Log "Tunnel down - monitor active, deferring reinstall (avoid race)"
+        } elseif ((Test-Path $WG_EXE) -and (Test-Path $CONFIG)) {
+            Log "Tunnel not running - reinstalling (mutex)"
+            if (Try-ReinstallTunnel) {
                 Log "Tunnel reinstalled OK"
                 & sc.exe config $TUNNEL_SVC start= delayed-auto 2>$null | Out-Null
+            } else {
+                Log "CRITICAL: Tunnel could not be reinstalled"
             }
-            else { Log "CRITICAL: Tunnel could not be reinstalled" }
         }
     } else {
         & sc.exe config $TUNNEL_SVC start= delayed-auto 2>$null | Out-Null
@@ -1504,22 +1592,6 @@ try {
         else { Log "CRITICAL: WGKillSwitchSvc could not start" }
     }
 
-    function IsMainMonitor([string]$cmd) {
-        if ([string]::IsNullOrWhiteSpace($cmd)) { return $false }
-        return ($cmd -match '(?:\\|/)monitor\.ps1(?:\s|"|$)')
-    }
-    function GetMonitorShellProcs() {
-        $found = @()
-        foreach ($shell in @('powershell', 'pwsh')) {
-            Get-Process $shell -EA SilentlyContinue | ForEach-Object {
-                try {
-                    $c = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -EA Stop).CommandLine
-                    if (IsMainMonitor $c) { $found += $_ }
-                } catch {}
-            }
-        }
-        return $found
-    }
     Start-Sleep -Milliseconds 500
     $procs = GetMonitorShellProcs
     if (($procs | Measure-Object).Count -gt 1) {
@@ -1616,7 +1688,7 @@ OK "wmi-repair.ps1 written"
 Write-Step "STEP 10 - SERVICE MONITOR (NSSM wrapper)"
 # ================================================================
 @'
-# WGKillSwitchSvc wrapper v11.0 (auto-generated by install.ps1)
+# WGKillSwitchSvc wrapper v11.4 (auto-generated by install.ps1)
 $LOG       = 'C:\WireGuard\killswitch.log'
 $REPAIR    = 'C:\WireGuard\repair.ps1'
 $COOLDOWN  = 'C:\WireGuard\repair-cooldown.txt'
@@ -1674,13 +1746,16 @@ function TriggerRepair([string]$reason) {
     Log $reason
     if (Test-Path $REPAIR) { Start-HiddenScript $REPAIR }
 }
-Log "WGKillSwitchSvc started (v11.0)"
+Log "WGKillSwitchSvc started (v11.4)"
 Start-Sleep -Seconds 15
 TriggerRepair "Initial repair triggered"
 while ($true) {
     $proc = GetMonitorShellProcs
     $tunnelDown = (( & sc.exe query $TUNNEL_SVC 2>$null) -notmatch 'RUNNING')
-    if ($tunnelDown) {
+    if ($tunnelDown -and $proc) {
+        Log "Monitor active - tunnel recovery delegated (no repair spawn)"
+        Start-Sleep -Seconds 60
+    } elseif ($tunnelDown) {
         TriggerRepair "Tunnel down - urgent repair (immediate)"
         Start-Sleep -Seconds 5
     } elseif (-not $proc) {
@@ -1715,7 +1790,7 @@ $atNssm = $NSSM
 $atSvcName = $WG_SVC_NAME
 $atTunnelSvc = $TUNNEL_SVC
 @"
-# WG Anti-Tamper Guard v11.3 (auto-generated by install.ps1)
+# WG Anti-Tamper Guard v11.4 (auto-generated by install.ps1)
 # Silently restores deleted/disabled protection layers from guard vault + registry.
 param([switch]`$Quick, [switch]`$NoChainRepair)
 `$ErrorActionPreference = 'SilentlyContinue'
@@ -2093,12 +2168,12 @@ $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRul
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators","FullControl",    "ContainerInherit,ObjectInherit","None","Allow")))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Users",         "ReadAndExecute", "ContainerInherit,ObjectInherit","None","Allow")))
 Set-Acl -Path $INSTALL_DIR -AclObject $acl
-Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -notin @('killswitch.log','kurtar.ps1','kurtar.bat') } |
+Get-ChildItem $INSTALL_DIR -File | Where-Object { $_.Name -notin @('killswitch.log','kurtar.ps1','kurtar2.ps1','kurtar.bat') } |
     ForEach-Object { attrib +S +H $_.FullName }
 OK "ACL set + files hidden"
 
 New-Item -Path "HKLM:\SOFTWARE\WGKillSwitch" -Force | Out-Null
-Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.3"                              -Force
+Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "Version"       "11.4"                              -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "MonitorPath"   $MONITOR_PS1                        -Force
 Set-ItemProperty "HKLM:\SOFTWARE\WGKillSwitch" "RepairPath"    $REPAIR_PS1                         -Force
 $taskXml = Export-ScheduledTask -TaskName $TASK_MONITOR
@@ -2367,11 +2442,11 @@ if ($defExcl -contains $INSTALL_DIR) { OK "Defender exclusion: ACTIVE" } else { 
 
 if ($CUSTOM_MODE) { OK "Mode: Custom server ($CustomEndpointIP)" } else { OK "Mode: Cloudflare WARP" }
 
-Log "install.ps1 v11.3 completed"
+Log "install.ps1 v11.4 completed"
 Write-Host ""
 if ($warnings -eq 0) {
     Write-Host "================================================================" -ForegroundColor Green
-    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v11.3)            " -ForegroundColor White
+    Write-Host "  INSTALL COMPLETE - SYSTEM FULLY PROTECTED (v11.4)            " -ForegroundColor White
     Write-Host "================================================================" -ForegroundColor Green
 } else {
     Write-Host "================================================================" -ForegroundColor Yellow

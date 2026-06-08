@@ -1,4 +1,4 @@
-# Comprehensive offline test suite — target quality 9.5/10 (v11.3)
+# Comprehensive offline test suite — target quality 9.5/10 (v11.4)
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -51,7 +51,7 @@ function Test-ScriptblockCreate([string]$path, [string]$label) {
 }
 
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Kill Switch FULL TEST SUITE (v11.3)' -ForegroundColor Cyan
+Write-Host '  Kill Switch FULL TEST SUITE (v11.4)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 # [1] install.ps1 compile + AST
@@ -62,8 +62,8 @@ Test-ParseFile $installPath 'install.ps1' | Out-Null
 $raw = [string](Get-Content -LiteralPath $installPath -Raw -Encoding UTF8)
 
 # [2] Version / critical patterns
-Write-Host "[2/10] v11.3 patterns" -ForegroundColor Yellow
-foreach ($n in @('v11.3','11.3','anti-tamper.ps1','Invoke-AntiTamperGuard','NoChainRepair','Write-GuardBackups','WGKillSwitchGuard','TaskXMLRepair','Log-Tamper','Restore-WmiSubscription','C:\ProgramData\WGKillSwitchGuard','v11.2','WG-RebootVerify','post-reboot-verify','RebootVerifyPath','Remove-OtherMonitorProcs','v11.1','Ensure-DelayedAutoStart','Test-DelayedAutoStart','Repair-ConfigIntegrity','Repair-EssentialFirewall','Test-NetworkChanged','NetworkFingerprint','Test-BlockRulePresent','wmi-cooldown','WmiCooldownActive','Sync-KillSwitchState','Test-ServerRulePresent','Set-ServerRule','Start-HiddenScript','8.8.8.8','hits -ge 2','GPO: zombie tunnel','Test-InstallInProgress','Write-KurtarScript','install.inprogress','kurtar.bat','Remove-IPv6FromConfig','Install-WmiSubscription','Tunnel lost while open','60s hold','tamperTick')) {
+Write-Host "[2/10] v11.4 patterns" -ForegroundColor Yellow
+foreach ($n in @('v11.4','11.4','kurtar2.ps1','Test-MainMonitorActive','deferring reinstall','tunnel recovery delegated','WGTunnelInstallMutex','anti-tamper.ps1','Invoke-AntiTamperGuard','NoChainRepair','Write-GuardBackups','WGKillSwitchGuard','TaskXMLRepair','Log-Tamper','Restore-WmiSubscription','C:\ProgramData\WGKillSwitchGuard','v11.3','v11.2','WG-RebootVerify','post-reboot-verify','RebootVerifyPath','Remove-OtherMonitorProcs','v11.1','Ensure-DelayedAutoStart','Test-DelayedAutoStart','Repair-ConfigIntegrity','Repair-EssentialFirewall','Test-NetworkChanged','NetworkFingerprint','Test-BlockRulePresent','wmi-cooldown','WmiCooldownActive','Sync-KillSwitchState','Test-ServerRulePresent','Set-ServerRule','Start-HiddenScript','8.8.8.8','hits -ge 2','GPO: zombie tunnel','Test-InstallInProgress','Write-KurtarScript','install.inprogress','kurtar.bat','Remove-IPv6FromConfig','Install-WmiSubscription','Tunnel lost while open','60s hold','tamperTick','STUCK: run')) {
     Assert-True ($raw -match [regex]::Escape($n)) "Missing: $n"
 }
 Assert-True ($raw -notmatch 'Get-MainMonitorProcs') 'Broken Get-MainMonitorProcs alias must be removed'
@@ -97,6 +97,8 @@ Write-Host "[5/10] repair.ps1 structure" -ForegroundColor Yellow
 Assert-True ($raw -match 'function Sync-KillSwitchState') 'repair Sync-KillSwitchState'
 Assert-True ($raw -match 'Sync-KillSwitchState\r?\n\} finally') 'Sync before repair finally'
 Assert-True ($raw -match 'function Enable-Block') 'repair Enable-Block'
+Assert-True ($raw -match 'function Try-ReinstallTunnel') 'repair Try-ReinstallTunnel'
+Assert-True ($raw -match 'monitor active, deferring reinstall') 'repair defers to monitor'
 
 # [6] Test-Internet 2-of-3 logic
 Write-Host "[6/10] Test-Internet logic" -ForegroundColor Yellow
