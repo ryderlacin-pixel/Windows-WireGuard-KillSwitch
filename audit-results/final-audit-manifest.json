@@ -328,6 +328,14 @@
         "SHA256":  "2C39177638B2FEACCEDF263656836C869F4885A96EDE53C3ADD2D83CB5149ACB"
     },
     {
+        "RelPath":  "docs/releases/v15.3.0.md",
+        "Tier":  "P4",
+        "Lines":  29,
+        "Bytes":  1285,
+        "Extension":  ".md",
+        "SHA256":  "C665FE159DF11D12C2F9F6C506B884028B97824095F30135E24D3D0400C49C24"
+    },
+    {
         "RelPath":  "emergency-reset.bat",
         "Tier":  "P0",
         "Lines":  29,
@@ -338,10 +346,10 @@
     {
         "RelPath":  "install.ps1",
         "Tier":  "P0",
-        "Lines":  100,
-        "Bytes":  4451,
+        "Lines":  109,
+        "Bytes":  4910,
         "Extension":  ".ps1",
-        "SHA256":  "CA8BBD7782053931DD67EA5A07BD36976BD7E16A7B6327B2B5A4C082478E4B12"
+        "SHA256":  "58A99C675069D6339E363E4B3C92C9C36F14C2B9EB30CBBA763E059C4422D4DE"
     },
     {
         "RelPath":  "lib/Install-Constants.ps1",
@@ -349,23 +357,23 @@
         "Lines":  70,
         "Bytes":  3031,
         "Extension":  ".ps1",
-        "SHA256":  "43203C49408AF5C782D4F7CCC27C54A032A8A29B737D6DFF43F50F6B772D7908"
+        "SHA256":  "E36A15276ECD45D0336E676D9E24C30900547F0FC69AF8DED7B5F9BFF25E2502"
     },
     {
         "RelPath":  "lib/Install-GeneratedScripts.ps1",
         "Tier":  "P0",
-        "Lines":  1629,
-        "Bytes":  67628,
+        "Lines":  1659,
+        "Bytes":  68855,
         "Extension":  ".ps1",
-        "SHA256":  "C37E9493ED113D93E3BA654085B54774870660E300EB97D45FBEDD31731E53E4"
+        "SHA256":  "21D3668548AAEB3EC6F6E37DDA1175E07525676EBED117598F0C52B5D2EEC2B1"
     },
     {
         "RelPath":  "lib/Install-Helpers.ps1",
         "Tier":  "P0",
-        "Lines":  539,
-        "Bytes":  22191,
+        "Lines":  586,
+        "Bytes":  23818,
         "Extension":  ".ps1",
-        "SHA256":  "4D7D2117803B47F50B84F5092DC7608A8CB5FF831E0677A990458F6C4F478CD8"
+        "SHA256":  "DAB3B5929C6A3CAFF1AB8FEF442043C27881654114F8998F39395A635072DB4E"
     },
     {
         "RelPath":  "lib/Install-MainSteps-0-6.ps1",
@@ -378,34 +386,34 @@
     {
         "RelPath":  "lib/Install-MainSteps-18-20.ps1",
         "Tier":  "P0",
-        "Lines":  297,
-        "Bytes":  17659,
+        "Lines":  322,
+        "Bytes":  18734,
         "Extension":  ".ps1",
-        "SHA256":  "9980116B67FDC203D3F99E76C12D56EBDE3039CD77D5442126FEFDF89A1CB36C"
+        "SHA256":  "79B705EA83163BB30B794B58A08EA6D431AF05A9D909BD5CD0341644D8B3A1BA"
     },
     {
         "RelPath":  "lib/Install-Privacy.ps1",
         "Tier":  "P0",
-        "Lines":  494,
-        "Bytes":  23821,
+        "Lines":  500,
+        "Bytes":  24050,
         "Extension":  ".ps1",
-        "SHA256":  "B3768EC8F5341CE260A4611E521645583139CFC40C2F89CED01A7ACC1945655B"
+        "SHA256":  "1CEA4EF744475E51C83FB88E951DB4D1C2B4D98C50751102D3971CC454F4AB05"
     },
     {
         "RelPath":  "lib/Install-SafeNetwork.ps1",
         "Tier":  "P0",
-        "Lines":  482,
-        "Bytes":  21967,
+        "Lines":  503,
+        "Bytes":  22634,
         "Extension":  ".ps1",
-        "SHA256":  "A98B2075DC971A8D5006F313912AA4198328D5C9ACDE03B4934FA8FD6910F0ED"
+        "SHA256":  "5643CAE3819C3847B4E1F976BCC575BD2AF094CD122B21A8E3323511B624B281"
     },
     {
         "RelPath":  "lib/Install-TasksAndWmi.ps1",
         "Tier":  "P0",
-        "Lines":  262,
-        "Bytes":  14635,
+        "Lines":  269,
+        "Bytes":  14925,
         "Extension":  ".ps1",
-        "SHA256":  "C5A93488170338F8E99E4E229FD625CCBC037E5CF7E5C1BBEE70FB3421DCFFE2"
+        "SHA256":  "728C830BFB72EF92596CD80420CA66091443D846A70240E576488B9A59F50E30"
     },
     {
         "RelPath":  "lib/Install-UpgradePaths.ps1",
@@ -435,9 +443,9 @@
         "RelPath":  "README.md",
         "Tier":  "P2",
         "Lines":  534,
-        "Bytes":  26852,
+        "Bytes":  26873,
         "Extension":  ".md",
-        "SHA256":  "73FB9C145F5D1B86E2A2D7DE70BFDC87DE111B040E7E878F3D931EFC4F78860D"
+        "SHA256":  "2D2AD857C73EB041589526504AF6B98C1E51C430AC3AF9EBA12C6509B246C007"
     },
     {
         "RelPath":  "scripts/behavior-sim-test.ps1",
@@ -464,6 +472,14 @@
         "SHA256":  "97B798B40C69AF9C138A6F1BC52F379C4911D62B8E56E12DEDE064934D115E19"
     },
     {
+        "RelPath":  "scripts/enable-dns-lockdown.ps1",
+        "Tier":  "P0",
+        "Lines":  38,
+        "Bytes":  1422,
+        "Extension":  ".ps1",
+        "SHA256":  "F58B57C72CCAA8E83E6DF235A6088A5906E948EC248F72FDF08B572343AD3E79"
+    },
+    {
         "RelPath":  "scripts/ensure-tor-sensitive.ps1",
         "Tier":  "P0",
         "Lines":  67,
@@ -483,17 +499,17 @@
         "RelPath":  "scripts/file-coverage-test.ps1",
         "Tier":  "P0-test",
         "Lines":  241,
-        "Bytes":  11651,
+        "Bytes":  11713,
         "Extension":  ".ps1",
-        "SHA256":  "5A5E30B2FB19B90576654389588C87C1EAFA52E97E955F0452B35127D22228A3"
+        "SHA256":  "FD8D4AA4EFA606B36AD591E6B06D6F4801FCC5956EC6D97910919F296BDF90F6"
     },
     {
         "RelPath":  "scripts/final-line-audit.ps1",
         "Tier":  "P0-test",
         "Lines":  340,
-        "Bytes":  15269,
+        "Bytes":  15302,
         "Extension":  ".ps1",
-        "SHA256":  "097CB8D85F4E997CACE686750E55BE4DB4624456E861CE4727CD75DC0393B012"
+        "SHA256":  "053A8DA48014DBAA3A5DF0CFEBB0D4102F7CD033EB052AD7F8F5772941A53772"
     },
     {
         "RelPath":  "scripts/github-visibility.ps1",
@@ -522,10 +538,10 @@
     {
         "RelPath":  "scripts/install-v15-privacy-stack.ps1",
         "Tier":  "P0",
-        "Lines":  452,
-        "Bytes":  20913,
+        "Lines":  468,
+        "Bytes":  21652,
         "Extension":  ".ps1",
-        "SHA256":  "BCE2B228F023A7D908B503876DE6F3BCC9490BE746BFD968B7315001173A05F3"
+        "SHA256":  "B55EF76AD700CFDBA8FEAED0A6AD36AC2E2AFB1AA8F87DA8CA129A554C9122A3"
     },
     {
         "RelPath":  "scripts/leak-audit.ps1",
@@ -589,7 +605,7 @@
         "Lines":  92,
         "Bytes":  5304,
         "Extension":  ".ps1",
-        "SHA256":  "7E8F2C330A19F61815A5219A83C61334C635D814B3372B5D34DF7623B959CA26"
+        "SHA256":  "7A03B88CD9A9AF060E89D7BB37B06B41A19A19945CC0DB188C2FE34AD57BE9DF"
     },
     {
         "RelPath":  "scripts/privacy-audit.ps1",
@@ -602,10 +618,10 @@
     {
         "RelPath":  "scripts/publish-releases.ps1",
         "Tier":  "P0",
-        "Lines":  147,
-        "Bytes":  5901,
+        "Lines":  148,
+        "Bytes":  5985,
         "Extension":  ".ps1",
-        "SHA256":  "3C5205BD18AA9B13199A244712A79682FF2EBDC60A67A2286DE84B93333BC411"
+        "SHA256":  "1B45C3B013021FC723D52F4FD2857C94A5476BE0139ED0640999D375BF98D4C6"
     },
     {
         "RelPath":  "scripts/push-v15.2.ps1",
@@ -626,10 +642,10 @@
     {
         "RelPath":  "scripts/reboot-sim-test.ps1",
         "Tier":  "P0-test",
-        "Lines":  492,
-        "Bytes":  21122,
+        "Lines":  495,
+        "Bytes":  21412,
         "Extension":  ".ps1",
-        "SHA256":  "40901C9DB6CB38066A5C94D5EA42DCA31BE859F0DE5ED00E26DEE5F3C1CB6FD7"
+        "SHA256":  "899F99BEC94F8E1D10352BE96F8FD9628155D0A05E29F5456ACADE4D6DF2478C"
     },
     {
         "RelPath":  "scripts/repair-wmi-subscription.ps1",
@@ -675,9 +691,9 @@
         "RelPath":  "scripts/safe-live-verify.ps1",
         "Tier":  "P0",
         "Lines":  275,
-        "Bytes":  15115,
+        "Bytes":  15139,
         "Extension":  ".ps1",
-        "SHA256":  "7FB84A089868136116CBC867769BE156AD77ED554ABF6873719B0BC82751472F"
+        "SHA256":  "A4DE9B52A5953A0AAF931EC8D97F03E1924366073B7A53F94426E2BE620B6B14"
     },
     {
         "RelPath":  "scripts/scriptblock-test.ps1",
@@ -714,18 +730,18 @@
     {
         "RelPath":  "scripts/Test-Helpers.ps1",
         "Tier":  "P0-test",
-        "Lines":  351,
-        "Bytes":  22205,
+        "Lines":  352,
+        "Bytes":  22523,
         "Extension":  ".ps1",
-        "SHA256":  "5CCA0219AA70D8A6E3739569C8E737DDBB60FBD9AEDEA891C8A132A74E7E33EF"
+        "SHA256":  "CA87303898A6ED32431498C13BD3EB257E4B463E2C5B8890DBFCB6C93D4AA189"
     },
     {
         "RelPath":  "scripts/test-suite.ps1",
         "Tier":  "P0-test",
-        "Lines":  300,
-        "Bytes":  14000,
+        "Lines":  320,
+        "Bytes":  15489,
         "Extension":  ".ps1",
-        "SHA256":  "7A972D09916529B1B380817D3BC1A360053383F2EDC489AF0761425D904A55A3"
+        "SHA256":  "ED02BF88D6FF2E6B2EE7DCE9F01C35CF262E1C907D06CB34069CA7ADF5B92115"
     },
     {
         "RelPath":  "scripts/tor-audit.ps1",

@@ -7,7 +7,7 @@ $libDir = Join-Path $repoRoot 'lib'
 . (Join-Path $PSScriptRoot 'Test-Helpers.ps1')
 $failures = [System.Collections.Generic.List[string]]::new()
 $script:passed = 0
-$TARGET = 510
+$TARGET = 513
 $BOOT_SAFE_SEC = 90
 
 function Assert-Reboot([bool]$cond, [string]$msg) {
@@ -198,7 +198,7 @@ $watchdog = $extracted.Watchdog
 $repairExtract = $extracted.Repair
 
 Write-Host '======================================================' -ForegroundColor Cyan
-Write-Host '  REBOOT SIM TESTS (510 post-reboot PC scenarios)' -ForegroundColor Cyan
+Write-Host '  REBOOT SIM TESTS (513 post-reboot PC scenarios)' -ForegroundColor Cyan
 Write-Host '======================================================' -ForegroundColor Cyan
 
 # [A] Monitor boot - 128 combos (7 flags) - NEVER firewall-block at startup
@@ -394,8 +394,11 @@ if ($watchdog) {
 Assert-Reboot ($main18Raw -match 'Test-DnscryptListening') 'Install: dnscrypt gate before DNS lock'
 Assert-Reboot ($main18Raw -match 'Remove-InstallBlocks') 'Install STEP19: clears blocks if unhealthy'
 Assert-Reboot ($main18Raw -match 'Set-BootGraceRegistry') 'Install: sets boot grace on complete'
-Assert-Reboot ($main18Raw -match 'Set-PostInstallGraceRegistry') 'Install: 15min post-install grace'
-Assert-Reboot ($main18Raw -match 'Start-Sleep -Seconds 45') 'Install: monitor delay after reboot path'
+Assert-Reboot ($main18Raw -match 'Set-PostInstallGraceRegistry') 'Install: post-install grace'
+Assert-Reboot ($main18Raw -match 'Set-PostInstallGraceRegistry -Minutes 60') 'Install: 60min post-install grace'
+Assert-Reboot ($main18Raw -match 'Set-KillSwitchArmedRegistry') 'Install: KillSwitchArmed gate'
+Assert-Reboot ($main18Raw -match 'Test-InstallHealthStable') 'Install: stability gate before arming'
+Assert-Reboot ($safeRaw -match 'Test-KillSwitchArmed') 'wg-safety: Test-KillSwitchArmed'
 Assert-Reboot ($safeRaw -match 'function Test-BlockAllowed') 'wg-safety: Test-BlockAllowed'
 Assert-Reboot ($safeRaw -match 'Disable-KillSwitchBlock') 'wg-safety: Disable-KillSwitchBlock'
 Assert-Reboot ($emerRaw -match 'source=dhcp') 'Emergency: DHCP DNS restore'

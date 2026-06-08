@@ -1,4 +1,4 @@
-# Comprehensive offline test suite - v15.2.9 rigor gate (no hollow tests)
+# Comprehensive offline test suite - v15.3.0 rigor gate (no hollow tests)
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -55,7 +55,7 @@ function Test-ExtractedScript {
 }
 
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Kill Switch FULL TEST SUITE (v15.2.9 - rigor gate)' -ForegroundColor Cyan
+Write-Host '  Kill Switch FULL TEST SUITE (v15.3.0 - rigor gate)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 $libDir = Join-Path $repoRoot 'lib'
@@ -83,7 +83,7 @@ $v15StackRaw = $contentMap['scripts/install-v15-privacy-stack.ps1']
 $v14StackRaw = $contentMap['scripts/install-v14-stack.ps1']
 
 # [2] File-scoped patterns (not hollow rawCombined)
-Write-Host "[2/17] File-scoped v15.2.9 patterns" -ForegroundColor Yellow
+Write-Host "[2/17] File-scoped v15.3.0 patterns" -ForegroundColor Yellow
 foreach ($row in (Get-FileScopedPatternMatrix)) {
     foreach ($item in (Get-PatternMatrixEntries $row)) {
         $found = $false
@@ -124,18 +124,20 @@ Write-Host "[5/17] repair.ps1 extract + compile" -ForegroundColor Yellow
 Test-ExtractedScript $extracted.Repair 'repair' @(
     'function Sync-KillSwitchState',
     'monitor-only block authority',
-    'dns-lockdown-guard.ps1',
+    'Test-PostInstallGrace',
+    'Test-KillSwitchArmed',
     'network-privacy-guard.ps1',
     'function Try-ReinstallTunnel',
     'monitor active, deferring reinstall',
     'cmd.exe /c'
 )
+Assert-True ($extracted.Repair -notmatch 'dns-lockdown-guard\.ps1') 'repair extract: no auto dns-lockdown'
 
 # [6] Extracted watchdog + wg-safety
 Write-Host "[6/17] watchdog + wg-safety extract + compile" -ForegroundColor Yellow
 Test-ExtractedScript $extracted.Watchdog 'watchdog' @('graduated fail-open', 'Invoke-GentleUnbrick', 'Invoke-DeepUnbrick', 'Restore-DhcpDnsOnPhysicalAdapters')
 if ($extracted.Safety) {
-    Test-ExtractedScript $extracted.Safety 'wg-safety' @('function Test-BlockAllowed', 'cmd.exe /c')
+    Test-ExtractedScript $extracted.Safety 'wg-safety' @('function Test-BlockAllowed', 'function Test-KillSwitchArmed', 'cmd.exe /c')
     Assert-True ($extracted.Safety -notmatch 'Invoke-Expression') 'wg-safety: no Invoke-Expression'
 } else { $failures.Add('wg-safety extract failed') }
 
@@ -189,6 +191,24 @@ $adminIdx = $installRaw.IndexOf('Administrator')
 $dryRunIdx = $installRaw.IndexOf('$script:InstallDryRun')
 $dotSourceIdx = $installRaw.IndexOf('foreach ($mod in $LibModules)')
 Assert-True (($adminIdx -ge 0) -and ($dryRunIdx -gt $adminIdx) -and ($dotSourceIdx -gt $dryRunIdx)) 'admin check before dot-source'
+Assert-True ($installRaw -match 'if \(\$script:InstallDryRun\) \{[\s\S]*?exit 0') 'DryRun: early exit after steps 0-6 (no steps 7-20)'
+Assert-True ($installRaw -match 'ZERO-SIDE-EFFECT') 'DryRun: zero-side-effect banner'
+$genRaw = $contentMap['lib/Install-GeneratedScripts.ps1']
+$tasksRaw = $contentMap['lib/Install-TasksAndWmi.ps1']
+$main1820Raw = $contentMap['lib/Install-MainSteps-18-20.ps1']
+if ($genRaw) { Assert-True ($genRaw -match 'if \(\$script:InstallDryRun\)') 'GeneratedScripts: DryRun guard' }
+if ($tasksRaw) { Assert-True ($tasksRaw -match 'if \(\$script:InstallDryRun\)') 'TasksAndWmi: DryRun guard' }
+if ($main1820Raw) { Assert-True ($main1820Raw -match 'if \(\$script:InstallDryRun\)') 'MainSteps 18-20: DryRun guard' }
+$safeNetRaw = $contentMap['lib/Install-SafeNetwork.ps1']
+if ($safeNetRaw) {
+    Assert-True ($safeNetRaw -match 'function Test-KillSwitchArmed') 'wg-safety: Test-KillSwitchArmed'
+    Assert-True ($safeNetRaw -match 'KillSwitchArmed') 'wg-safety: armed gate in Test-BlockAllowed'
+}
+$repairExtract = if ($genRaw) { $genRaw } else { '' }
+if ($repairExtract -match '\$repairContent') {
+    Assert-True ($repairExtract -match 'Test-PostInstallGrace') 'repair: PostInstallGrace fail-open'
+    Assert-True ($repairExtract -notmatch 'dns-lockdown-guard\.ps1') 'repair: no auto dns-lockdown'
+}
 
 # [10] Ensure-ServerRule efficiency
 Write-Host "[10/17] Ensure-ServerRule efficiency" -ForegroundColor Yellow

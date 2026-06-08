@@ -2,6 +2,13 @@
 #Requires -Version 5.1
 
 function Invoke-InstallMainSteps18to20 {
+if ($script:InstallDryRun) {
+    if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+        Write-SafeActionLog 'Would run steps 18-20 (privacy stack, install lock clear, monitor start)'
+    }
+    OK 'DRY-RUN: activation steps skipped (steps 18-20 not executed)'
+    return
+}
 Write-Step "STEP 18 - DEFENDER EXCLUSION"
 # ================================================================
 try {
@@ -79,7 +86,7 @@ if (Get-Command Invoke-V15StrongPrivacyStack -EA SilentlyContinue) {
 } else { WARN "v15 strong privacy stack skipped" }
 
 # ================================================================
-Write-Step "STEP 19 - ACTIVATE MONITOR + CLEAR INSTALL LOCK"
+Write-Step "STEP 19 - STABILITY GATE + ARM KILL SWITCH + ACTIVATE MONITOR"
 # ================================================================
 Ensure-TunnelForInstall | Out-Null
 Ensure-DelayedAutoStart
@@ -87,10 +94,24 @@ Disable-TunnelIPv6BindingsOnly
 Remove-KurtarArtifacts
 New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
 Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'EnableFailsafe' ([int]$script:EnableFailsafe) -Type DWord -Force
+Set-KillSwitchArmedRegistry -Armed $false
 Set-BootGraceRegistry -Seconds $script:BOOT_GRACE_SEC
-Set-PostInstallGraceRegistry -Minutes 15
+Set-PostInstallGraceRegistry -Minutes 60
+OK "Fail-open holds: $($script:BOOT_GRACE_SEC)s BootGrace + 60min post-install grace (KillSwitchArmed=0 until stable)"
+Write-Info "Waiting for tunnel + internet stability (3 checks x 20s) before arming kill switch..."
+$stabilityOK = $false
+if (Get-Command Test-InstallHealthStable -ErrorAction SilentlyContinue) {
+    $stabilityOK = Test-InstallHealthStable -Checks 3 -IntervalSec 20
+}
+if ($stabilityOK) {
+    Set-KillSwitchArmedRegistry -Armed $true
+    OK "KillSwitchArmed=1 (tunnel + internet stable for 60s)"
+} else {
+    WARN "Stability gate not passed - KillSwitchArmed stays 0 (internet stays open; monitor will not block)"
+    Remove-InstallBlocks
+}
 Clear-InstallLock
-OK "Install lock cleared - $($script:BOOT_GRACE_SEC)s BootGrace + 15min post-install grace (fail-open)"
+OK "Install lock cleared"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $emerBat = Join-Path $repoRoot 'emergency-reset.bat'
 $emerPs1 = Join-Path $repoRoot 'scripts\emergency-reset.ps1'
@@ -118,9 +139,13 @@ if (Test-Path $NSSM) {
     if ($svcStatus -match 'RUNNING') { OK 'WGKillSwitchSvc: RUNNING (delayed-auto)' }
     else { WARN 'WGKillSwitchSvc: start pending - repair layers still active' }
 }
-Write-Info "Monitor start delayed 45s (post-install stability window)..."
-Start-Sleep -Seconds 45
-Start-HiddenScript $MONITOR_PS1
+if ($stabilityOK) {
+    Write-Info "Monitor start delayed 30s (post-arm stability window)..."
+    Start-Sleep -Seconds 30
+    Start-HiddenScript $MONITOR_PS1
+} else {
+    WARN "Monitor start deferred - run install.ps1 again or repair.ps1 after tunnel+internet are healthy"
+}
 Start-Sleep 5
 if (-not (Test-SafeToOpen)) {
     Remove-InstallBlocks

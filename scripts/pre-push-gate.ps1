@@ -30,7 +30,7 @@ Write-Host "`n>> Version consistency" -ForegroundColor Yellow
 $constants = Get-Content (Join-Path $repoRoot 'lib\Install-Constants.ps1') -Raw -Encoding UTF8
 $install   = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -match "\`$WG_KS_VERSION = '([^']+)'") { $ver = $Matches[1] } else { $ver = '' }
-Assert-Gate ($ver -eq '15.2.9') "WG_KS_VERSION = 15.2.9 (got '$ver')"
+Assert-Gate ($ver -eq '15.3.0') "WG_KS_VERSION = 15.3.0 (got '$ver')"
 Assert-Gate ($install -match 'v15\.2\.9') 'install.ps1 header version'
 Assert-Gate (-not ($constants -match '[^\x09\x0A\x0D\x20-\x7E]')) 'Install-Constants.ps1: ASCII-only (no mojibake)'
 
@@ -78,7 +78,7 @@ else { Write-Host '  [OK]   final-line-audit.ps1 (0 ERROR)' -ForegroundColor Gre
 
 # 6) Release notes exist for current version
 Write-Host "`n>> Release artifact" -ForegroundColor Yellow
-Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.2.9.md')) 'docs/releases/v15.2.9.md exists'
+Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.3.0.md')) 'docs/releases/v15.3.0.md exists'
 
 Write-Host ''
 if ($failures.Count -eq 0) {

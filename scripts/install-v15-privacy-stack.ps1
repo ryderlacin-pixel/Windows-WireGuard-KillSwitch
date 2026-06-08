@@ -48,9 +48,19 @@ user_pref("network.http.referer.XOriginTrimmingPolicy", 2);
 function Install-DnscryptExeFirewallRule {
     $prog = 'C:\WireGuard\dnscrypt-proxy\dnscrypt-proxy.exe'
     if (-not (Test-Path $prog)) { return $false }
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would add KS-Dnscrypt-EXE firewall rule'
+        }
+        return $true
+    }
     $exists = (netsh advfirewall firewall show rule name='KS-Dnscrypt-EXE' 2>&1 | Out-String) -notmatch 'No rules match'
     if (-not $exists) {
-        netsh advfirewall firewall add rule name='KS-Dnscrypt-EXE' dir=out action=allow program="$prog" enable=yes 2>$null | Out-Null
+        if (Get-Command Invoke-SafeNetsh -ErrorAction SilentlyContinue) {
+            Invoke-SafeNetsh "netsh advfirewall firewall add rule name=`"KS-Dnscrypt-EXE`" dir=out action=allow program=`"$prog`" enable=yes" 'dnscrypt EXE'
+        } else {
+            netsh advfirewall firewall add rule name='KS-Dnscrypt-EXE' dir=out action=allow program="$prog" enable=yes 2>$null | Out-Null
+        }
         OK 'KS-Dnscrypt-EXE firewall rule added'
     }
     return $true
@@ -327,11 +337,9 @@ function Patch-RepairV15GuardChain {
     $repairPath = 'C:\WireGuard\repair.ps1'
     if (-not (Test-Path $repairPath)) { return $false }
     $raw = [System.IO.File]::ReadAllText($repairPath)
-    if ($raw -match 'dns-lockdown-guard\.ps1') { return $true }
+    if ($raw -match 'network-privacy-guard\.ps1') { return $true }
     $insert = @'
 
-    $wgDnsLock = 'C:\WireGuard\dns-lockdown-guard.ps1'
-    if (Test-Path $wgDnsLock) { & $wgDnsLock }
     $wgNetPriv = 'C:\WireGuard\network-privacy-guard.ps1'
     if (Test-Path $wgNetPriv) { & $wgNetPriv }
 
@@ -339,15 +347,23 @@ function Patch-RepairV15GuardChain {
     $anchor = 'if (Test-Path $wgDns) { & $wgDns }'
     if ($raw -notmatch [regex]::Escape($anchor)) { return $false }
     $raw = $raw.Replace($anchor, "$anchor$insert")
-    if ($raw -notmatch 'dns-lockdown-guard\.ps1') { return $false }
+    if ($raw -notmatch 'network-privacy-guard\.ps1') { return $false }
     icacls $repairPath /grant 'BUILTIN\Administrators:F' /C 2>$null | Out-Null
     attrib -R -S -H $repairPath 2>$null | Out-Null
     [System.IO.File]::WriteAllText($repairPath, $raw, [System.Text.UTF8Encoding]::new($false))
-    OK 'repair.ps1 patched with v15 guard chain'
+    OK 'repair.ps1 patched with network-privacy guard (dns-lockdown manual-only)'
     return $true
 }
 
 function Invoke-V15StrongPrivacyStack {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would deploy v15 strong privacy stack (guards deferred in DryRun)'
+        } elseif (Get-Command Write-Info -ErrorAction SilentlyContinue) {
+            Write-Info '[DRY-RUN] v15 strong privacy stack skipped'
+        }
+        return
+    }
     try {
         if (Get-Command Invoke-V14FullPrivacyStack -EA SilentlyContinue) {
             Invoke-V14FullPrivacyStack
@@ -376,7 +392,7 @@ function Invoke-V15StrongPrivacyStack {
                 Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
                 Start-Sleep -Seconds 2
                 foreach ($g in @(
-                    $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
+                    $script:NETWORK_PRIVACY_GUARD_PS1,
                     $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
                 )) {
                     Invoke-GuardScriptSafe -Path $g -Label (Split-Path $g -Leaf)
@@ -385,7 +401,7 @@ function Invoke-V15StrongPrivacyStack {
                 if (Test-Path $script:DNSCRYPT_GUARD_PS1) { & $script:DNSCRYPT_GUARD_PS1 2>$null }
                 Start-Sleep -Seconds 2
                 foreach ($g in @(
-                    $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
+                    $script:NETWORK_PRIVACY_GUARD_PS1,
                     $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
                 )) {
                     if (Test-Path $g) { & $g 2>$null }

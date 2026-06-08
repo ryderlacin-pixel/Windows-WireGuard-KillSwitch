@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.9)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.3.0)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1
@@ -73,15 +73,24 @@ $v15StackPath = Join-Path $PSScriptRoot 'scripts\install-v15-privacy-stack.ps1'
 if (Test-Path $v15StackPath) { . $v15StackPath } else { Write-Host ' [WARN] install-v15-privacy-stack.ps1 missing - v15 features disabled' -ForegroundColor Yellow }
 
 if ($DryRun) {
-    Write-Host "`n [DRY-RUN] Active - no firewall rules, firewall policy, adapter bindings, or IPv6 registry lock." -ForegroundColor Yellow
-    Write-Host "           Network-hardening steps are logged only. Downloads, scripts, tasks may still run." -ForegroundColor Gray
-    Write-Host "           Re-run without -DryRun to apply network changes." -ForegroundColor Gray
+    Write-Host "`n [DRY-RUN] ZERO-SIDE-EFFECT mode (v$WG_KS_VERSION)" -ForegroundColor Yellow
+    Write-Host "           Steps 0-6: network/registry mutations logged only (no netsh/registry apply)." -ForegroundColor Gray
+    Write-Host "           Steps 7-20: SKIPPED entirely (no scripts, tasks, WMI, monitor, guards)." -ForegroundColor Gray
+    Write-Host "           Re-run without -DryRun for a full install." -ForegroundColor Gray
 }
 
 if (Invoke-InstallUpgradeEarlyExit) { exit 0 }
 
 try {
 Invoke-InstallMainSteps0to6
+if ($script:InstallDryRun) {
+    Write-Step 'DRY-RUN COMPLETE'
+    OK 'Preview finished - zero persistence deployed (steps 7-20 skipped)'
+    Write-Host "`n [DRY-RUN] No firewall rules, tasks, monitor, or guards were activated." -ForegroundColor Green
+    Write-Host "           Your network was not modified by steps 7-20." -ForegroundColor Green
+    if (-not $NoPause) { pause }
+    exit 0
+}
 Invoke-InstallGeneratedScripts
 Invoke-InstallTasksAndWmi
 Invoke-InstallMainSteps18to20

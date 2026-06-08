@@ -2,6 +2,13 @@
 #Requires -Version 5.1
 
 function Invoke-InstallGeneratedScripts {
+if ($script:InstallDryRun) {
+    if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+        Write-SafeActionLog 'Would deploy generated scripts (monitor, repair, watchdog, service, WMI wrapper)'
+    }
+    OK 'DRY-RUN: script deployment skipped (steps 7-16 not executed)'
+    return
+}
 Invoke-DeployWgSafetyModule -Version $WG_KS_VERSION
 OK "wg-safety.ps1 runtime module deployed"
 
@@ -355,12 +362,16 @@ while (`$bootWait -lt 90 -and -not (Test-TunnelRunning)) {
     Start-Sleep -Seconds 3; `$bootWait += 3
 }
 
-if (Test-SafeToOpen -or Test-BootGrace -or Test-UnbrickActive) {
+if (-not (Test-KillSwitchArmed)) {
+    `$state = 'open'
+    Disable-Block
+    Log "Startup: KillSwitchArmed=0 - internet open (no block authority)"
+} elseif (Test-SafeToOpen -or Test-BootGrace -or Test-UnbrickActive -or Test-PostInstallGrace) {
     `$state = 'open'
     Clear-DnsClientCache -EA SilentlyContinue
     Disable-Block
     if (Test-SafeToOpen) { Log "Startup: healthy (waited `${bootWait}s), internet open" }
-    else { Log "Startup: fail-open hold (boot-grace/unbrick), internet open" }
+    else { Log "Startup: fail-open hold (boot-grace/unbrick/post-install), internet open" }
 } else {
     `$state = 'open'
     Disable-Block
@@ -381,6 +392,17 @@ if (Test-SafeToOpen -or Test-BootGrace -or Test-UnbrickActive) {
 while (`$true) {
     if (-not `$startupRecovery) { Start-Sleep -Seconds 2 }
     `$startupRecovery = `$false
+    if (-not (Test-KillSwitchArmed)) {
+        Disable-Block
+        Disable-DnsLeakProtection
+        Clear-DnsClientCache -EA SilentlyContinue
+        if (`$state -ne 'open') {
+            Log "KillSwitchArmed=0 - fail-open (no block authority)"
+            `$state = 'open'; `$wasOpen = `$true
+        }
+        Start-Sleep -Seconds 30
+        continue
+    }
     if (Test-UnbrickActive -or Test-BootGrace -or Test-PostInstallGrace) {
         Disable-Block
         Disable-DnsLeakProtection
@@ -436,13 +458,13 @@ while (`$true) {
 
     if (Test-TunnelRunning) {
         `$script:zombieStreak++
-        if (`$script:zombieStreak -lt 15) {
-            if (`$script:zombieStreak -eq 1) { Log "Zombie tunnel suspected - waiting 15x before block (fail-open)" }
+        if (`$script:zombieStreak -lt 30) {
+            if (`$script:zombieStreak -eq 1) { Log "Zombie tunnel suspected - waiting 30x before block (fail-open)" }
             `$wasOpen = `$false
             Start-Sleep -Seconds 2
             continue
         }
-        Log "Zombie tunnel confirmed 15x/30s - block"
+        Log "Zombie tunnel confirmed 30x/60s - block"
     } else {
         `$script:zombieStreak = 0
         Log "Tunnel down - block"
@@ -896,11 +918,18 @@ $PID | Set-Content $LOCK -Force -EA SilentlyContinue
 try {
     if (Test-Path $LOG) { attrib -H -S $LOG 2>$null | Out-Null }
 
-    if (Test-UnbrickActive -or Test-BootGrace) {
+    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace -or Test-PostInstallGrace) {
         Disable-Block
         Disable-DnsLeakProtection
         Clear-DnsClientCache -EA SilentlyContinue
-        Log "Fail-open hold - repair skipped (no re-block)"
+        Log "Fail-open hold (install/grace) - repair skipped (no re-block, no DNS lock)"
+        exit 0
+    }
+    if (-not (Test-KillSwitchArmed)) {
+        Disable-Block
+        Disable-DnsLeakProtection
+        Clear-DnsClientCache -EA SilentlyContinue
+        Log "KillSwitchArmed=0 - repair skipped (no block authority)"
         exit 0
     }
 
@@ -915,8 +944,6 @@ try {
     }
     $wgDns = 'C:\WireGuard\dnscrypt-guard.ps1'
     if (Test-Path $wgDns) { & $wgDns }
-    $wgDnsLock = 'C:\WireGuard\dns-lockdown-guard.ps1'
-    if (Test-Path $wgDnsLock) { & $wgDnsLock }
     $wgNetPriv = 'C:\WireGuard\network-privacy-guard.ps1'
     if (Test-Path $wgNetPriv) { & $wgNetPriv }
     $wgTor = 'C:\WireGuard\tor-hardening-guard.ps1'
@@ -1034,6 +1061,9 @@ function Log([string]`$m) {
     Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WATCHDOG] `$m" -Encoding UTF8 -EA SilentlyContinue
 }
 function Test-HoldActive {
+    if (Test-InstallInProgress) { return `$true }
+    if (Test-PostInstallGrace) { return `$true }
+    if (-not (Test-KillSwitchArmed)) { return `$true }
     try {
         `$reg = Get-ItemProperty `$REG_KEY -EA SilentlyContinue
         if (`$reg.UnbrickUntil -and (Get-Date) -lt [datetime]`$reg.UnbrickUntil) { return `$true }

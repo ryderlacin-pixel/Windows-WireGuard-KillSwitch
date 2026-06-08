@@ -241,7 +241,7 @@ function Set-BootGraceRegistry {
 }
 
 function Set-PostInstallGraceRegistry {
-    param([int]$Minutes = 15)
+    param([int]$Minutes = 60)
     if ($script:InstallDryRun) {
         Write-SafeActionLog "Would set PostInstallGraceUntil for ${Minutes}min"
         return
@@ -249,6 +249,18 @@ function Set-PostInstallGraceRegistry {
     try {
         New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
         Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'PostInstallGraceUntil' (Get-Date).AddMinutes($Minutes).ToString('o') -Force
+    } catch {}
+}
+
+function Set-KillSwitchArmedRegistry {
+    param([bool]$Armed = $true)
+    if ($script:InstallDryRun) {
+        Write-SafeActionLog "Would set KillSwitchArmed=$([int]$Armed)"
+        return
+    }
+    try {
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'KillSwitchArmed' ([int]$Armed) -Type DWord -Force
     } catch {}
 }
 
@@ -376,7 +388,16 @@ function Test-InstallInProgress {
     } catch { return `$false }
 }
 
+function Test-KillSwitchArmed {
+    try {
+        `$reg = Get-ItemProperty `$REG_KEY -Name KillSwitchArmed -EA SilentlyContinue
+        return (`$reg.KillSwitchArmed -eq 1)
+    } catch {}
+    return `$false
+}
+
 function Test-BlockAllowed {
+    if (-not (Test-KillSwitchArmed)) { return `$false }
     if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace -or Test-PostInstallGrace -or (Test-BootSafeWindow)) { return `$false }
     return `$true
 }

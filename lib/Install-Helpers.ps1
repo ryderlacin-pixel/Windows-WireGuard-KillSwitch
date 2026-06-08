@@ -45,6 +45,12 @@ function Get-PreferredShell {
 }
 
 function Start-HiddenScript([string]$ScriptPath) {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog "Would start hidden script: $ScriptPath"
+        }
+        return
+    }
     $shell = Get-PreferredShell
     $argList = "-NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
     Start-Process -FilePath $shell -ArgumentList $argList -WindowStyle Hidden
@@ -135,6 +141,12 @@ function Invoke-ScCommand([string[]]$args, [int]$timeoutSec = 10) {
 }
 
 function Remove-TaskFully($name) {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog "Would remove scheduled task: $name"
+        }
+        return
+    }
     $tn = '\' + $name
     Invoke-Schtasks @('/End', '/TN', $tn, '/F')
     Invoke-Schtasks @('/Delete', '/TN', $tn, '/F')
@@ -217,6 +229,12 @@ function Register-TaskViaSchtasks(
     [string]$ScheduleArgs,
     [int]$TimeoutSec = 45
 ) {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog "Would register scheduled task: $Name ($ScheduleArgs)"
+        }
+        return $false
+    }
     $tn = '\' + $Name
     $args = @('/Create', '/TN', $tn, '/TR', "`"$Command`"", '/RU', 'SYSTEM', '/RL', 'HIGHEST', '/F') + $ScheduleArgs.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
     try {
@@ -285,6 +303,12 @@ function Get-MonitorShellProcs() {
 }
 
 function Set-InstallLock {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would set install lock (install.inprogress + registry)'
+        }
+        return
+    }
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
     Set-Content $INSTALL_LOCK (Get-Date -Format 'o') -Force -EA SilentlyContinue
     New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
@@ -292,6 +316,12 @@ function Set-InstallLock {
 }
 
 function Clear-InstallLock {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would clear install lock'
+        }
+        return
+    }
     Remove-Item $INSTALL_LOCK -Force -EA SilentlyContinue
     Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
 }
@@ -367,7 +397,6 @@ function Invoke-DeferredPrivacyGuards {
     }
     foreach ($g in @(
         $(if ($script:DNSCRYPT_GUARD_PS1) { $script:DNSCRYPT_GUARD_PS1 } else { "$INSTALL_DIR\dnscrypt-guard.ps1" }),
-        $(if ($script:DNS_LOCKDOWN_GUARD_PS1) { $script:DNS_LOCKDOWN_GUARD_PS1 } else { "$INSTALL_DIR\dns-lockdown-guard.ps1" }),
         $(if ($script:NETWORK_PRIVACY_GUARD_PS1) { $script:NETWORK_PRIVACY_GUARD_PS1 } else { "$INSTALL_DIR\network-privacy-guard.ps1" })
     )) {
         if ($g) { Invoke-GuardScriptSafe -Path $g -Label (Split-Path $g -Leaf) | Out-Null }
@@ -379,6 +408,12 @@ function Invoke-GuardScriptSafe {
         [Parameter(Mandatory)][string]$Path,
         [string]$Label = 'guard'
     )
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog "Would run guard script: $Label ($Path)"
+        }
+        return $false
+    }
     if (-not (Test-Path $Path)) { return $false }
     try {
         & $Path 2>$null
@@ -436,6 +471,12 @@ function Restore-TunnelConfigIfMissing {
 }
 
 function Restart-TunnelWithConfig {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would restart WireGuard tunnel with config'
+        }
+        return $true
+    }
     Restore-TunnelConfigIfMissing | Out-Null
     if (-not (Test-Path $CONFIG)) { return $false }
     if (Test-TunnelRunning) {
@@ -466,6 +507,12 @@ function Restart-TunnelWithConfig {
 }
 
 function Ensure-TunnelForInstall {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would ensure WireGuard tunnel for install'
+        }
+        return $true
+    }
     if (Test-TunnelServiceRunning) {
         OK "Tunnel already RUNNING - kept alive during upgrade"
         return $true

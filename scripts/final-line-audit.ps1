@@ -14,8 +14,8 @@ $functionInventory = @{}
 $errors = 0
 $warns = 0
 $passed = 0
-$CURRENT_VER = '15.2.9'
-$CURRENT_ASSERTIONS = '1008'
+$CURRENT_VER = '15.3.0'
+$CURRENT_ASSERTIONS = '1013'
 
 function Get-RuleStringList {
     param($Rule, [string]$Key)
@@ -49,7 +49,7 @@ function Add-Finding {
 
 function Test-CurrentDocClaims {
     param([string]$RelPath, [string]$Content, [string[]]$Lines)
-    if ($RelPath -notin @('README.md', 'docs/releases/v15.2.9.md', 'CONTRIBUTING.md', 'docs/PROMOTION.md', 'docs/LAUNCH_CHECKLIST.md', 'docs/CODE_REVIEW.md', 'docs/GITHUB_TOKEN.md')) { return }
+    if ($RelPath -notin @('README.md', 'docs/releases/v15.3.0.md', 'CONTRIBUTING.md', 'docs/PROMOTION.md', 'docs/LAUNCH_CHECKLIST.md', 'docs/CODE_REVIEW.md', 'docs/GITHUB_TOKEN.md')) { return }
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         $ln = $Lines[$i]
         $n = $i + 1
@@ -64,11 +64,11 @@ function Test-CurrentDocClaims {
                 Add-Finding $RelPath $n 'ERROR' 'stale_assertion_count' "README says 164+ assertions (current: $CURRENT_ASSERTIONS+)"
             }
             if ($ln -match 'version 15\.2' -and $ln -notmatch '15\.2\.9') {
-                Add-Finding $RelPath $n 'WARN' 'stale_constants_ref' 'README references lib version 15.2 not 15.2.9'
+                Add-Finding $RelPath $n 'WARN' 'stale_constants_ref' 'README references lib version 15.2 not 15.3.0'
             }
         }
-        if ($RelPath -eq 'docs/releases/v15.2.9.md' -and $ln -match '\b915\b' -and $ln -notmatch 'was|previously|old') {
-            Add-Finding $RelPath $n 'WARN' 'stale_assertion_count' 'v15.2.9 release note mentions obsolete 915 count'
+        if ($RelPath -eq 'docs/releases/v15.3.0.md' -and $ln -match '\b915\b' -and $ln -notmatch 'was|previously|old') {
+            Add-Finding $RelPath $n 'WARN' 'stale_assertion_count' 'v15.3.0 release note mentions obsolete 915 count'
         }
         if ($RelPath -eq 'CONTRIBUTING.md' -and $ln -match '164\+') {
             Add-Finding $RelPath $n 'ERROR' 'stale_assertion_count' "CONTRIBUTING says 164+ assertions (current: $CURRENT_ASSERTIONS+)"
@@ -232,10 +232,10 @@ foreach ($entry in $manifest) {
         '\.yml$' { Test-YmlFile $rel $content }
         '\.md$' {
             if ($rel -eq 'README.md' -and $content -notmatch '15\.2\.9') {
-                Add-Finding $rel 0 'WARN' 'readme_version' 'README does not mention 15.2.9 prominently'
+                Add-Finding $rel 0 'WARN' 'readme_version' 'README does not mention 15.3.0 prominently'
             }
             if ($rel -match 'docs/releases/v15\.2\.9' -and $content -notmatch '1008') {
-                Add-Finding $rel 0 'WARN' 'release_test_count' 'v15.2.9.md should document 1008 assertion gate'
+                Add-Finding $rel 0 'WARN' 'release_test_count' 'v15.3.0.md should document 1013 assertion gate'
             }
         }
     }
@@ -263,7 +263,7 @@ foreach ($pair in @(
     @{ Name = 'monitor'; Content = $extracted.Monitor; Required = @('function Enable-Block', 'Test-BlockAllowed', 'Disable-Block') }
     @{ Name = 'repair'; Content = $extracted.Repair; Required = @('function Sync-KillSwitchState', 'function Try-ReinstallTunnel') }
     @{ Name = 'watchdog'; Content = $extracted.Watchdog; Required = @('Invoke-GentleUnbrick', 'Invoke-DeepUnbrick') }
-    @{ Name = 'wg-safety'; Content = $extracted.Safety; Required = @('function Test-BlockAllowed') }
+    @{ Name = 'wg-safety'; Content = $extracted.Safety; Required = @('function Test-BlockAllowed', 'function Test-KillSwitchArmed') }
 )) {
     if (-not $pair.Content) {
         Add-Finding "generated/$($pair.Name).ps1" 0 'ERROR' 'extract_fail' "Could not extract $($pair.Name)"
@@ -290,8 +290,8 @@ $install = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -notmatch "\`$WG_KS_VERSION = '$CURRENT_VER'") {
     Add-Finding 'lib/Install-Constants.ps1' 0 'ERROR' 'version_mismatch' "WG_KS_VERSION must be $CURRENT_VER"
 }
-if ($install -notmatch 'v15\.2\.9') {
-    Add-Finding 'install.ps1' 0 'ERROR' 'version_mismatch' 'install.ps1 header must reference v15.2.9'
+if ($install -notmatch 'v15\.3\.0') {
+    Add-Finding 'install.ps1' 0 'ERROR' 'version_mismatch' 'install.ps1 header must reference v15.3.0'
 }
 
 # Write outputs (materialize strings before Set-Content - safe under x3 test-suite runs)

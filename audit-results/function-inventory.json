@@ -295,6 +295,7 @@
                                         "Invoke-FailOpenSafeguard",
                                         "Set-BootGraceRegistry",
                                         "Set-PostInstallGraceRegistry",
+                                        "Set-KillSwitchArmedRegistry",
                                         "Get-WgSafetyRuntimeScript",
                                         "Invoke-DeployWgSafetyModule"
                                     ],
@@ -303,6 +304,7 @@
     "scripts/scriptblock-test.ps1":  {
 
                                      },
+    "scripts/enable-dns-lockdown.ps1":  "Test-AdminElevation",
     "lib/Install-Privacy.ps1":  [
                                     "Get-ChromiumPrivacyDWordProps",
                                     "Get-FirefoxPrivacyPolicyJson",

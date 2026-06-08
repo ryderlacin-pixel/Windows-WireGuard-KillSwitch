@@ -2,6 +2,13 @@
 #Requires -Version 5.1
 
 function Invoke-InstallTasksAndWmi {
+if ($script:InstallDryRun) {
+    if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+        Write-SafeActionLog 'Would register tasks, WMI, GPO, registry backups, and NSSM service'
+    }
+    OK 'DRY-RUN: persistence layers skipped (steps 11-17 not executed)'
+    return
+}
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $repoScripts = Join-Path $repoRoot 'scripts'
 Write-Step "STEP 11 - MAIN SCHEDULED TASK (60s boot delay)"

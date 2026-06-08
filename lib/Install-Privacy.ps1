@@ -297,6 +297,12 @@ function Test-DelayedAutoStart {
 }
 
 function Install-WmiSubscription {
+    if ($script:InstallDryRun) {
+        if (Get-Command Write-SafeActionLog -ErrorAction SilentlyContinue) {
+            Write-SafeActionLog 'Would install WMI permanent event subscription'
+        }
+        return $false
+    }
     if (Test-WmiSubscriptionActive) { return $true }
     $cim = Get-ShortCimSession
     $ca = @{ Namespace = 'root\subscription' }

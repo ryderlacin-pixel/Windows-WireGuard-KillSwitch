@@ -155,7 +155,7 @@ $extracted = Get-ExtractedGeneratedScripts $repoRoot
 $genChecks = @(
     @{ Name = 'monitor'; Content = $extracted.Monitor; Must = @('function Enable-Block', 'Test-BlockAllowed', 'Disable-Block', 'zombie', 'fail-open', 'Install in progress') }
     @{ Name = 'gpo'; Content = $extracted.Gpo; Must = @('Disable-KillSwitchBlock', 'fail-open', 'never blocks') }
-    @{ Name = 'repair'; Content = $extracted.Repair; Must = @('function Sync-KillSwitchState', 'monitor-only block authority', 'function Try-ReinstallTunnel', 'cmd.exe /c', 'dns-lockdown-guard.ps1') }
+    @{ Name = 'repair'; Content = $extracted.Repair; Must = @('function Sync-KillSwitchState', 'monitor-only block authority', 'function Try-ReinstallTunnel', 'cmd.exe /c', 'Test-PostInstallGrace', 'Test-KillSwitchArmed'); MustNot = @('dns-lockdown-guard.ps1') }
     @{ Name = 'watchdog'; Content = $extracted.Watchdog; Must = @('graduated fail-open', 'Invoke-GentleUnbrick', 'Invoke-DeepUnbrick', 'Restore-DhcpDnsOnPhysicalAdapters') }
     @{ Name = 'wg-safety'; Content = $extracted.Safety; Must = @('function Test-BlockAllowed', 'cmd.exe /c'); MustNot = @('Invoke-Expression') }
 )
@@ -191,11 +191,11 @@ Write-Host '[H2] Release notes + ci.ps1 + emergency.bat' -ForegroundColor Yellow
 if ($bat) {
     Assert-Coverage ($bat -match 'EnableExtensions') 'emergency-reset.bat: setlocal' 'emergency-reset.bat'
 }
-$releasePath = Join-Path $repoRoot 'docs\releases\v15.2.9.md'
+$releasePath = Join-Path $repoRoot 'docs\releases\v15.3.0.md'
 if (Test-Path $releasePath) {
     $relNote = Get-Content -LiteralPath $releasePath -Raw -Encoding UTF8
-    Assert-Coverage ($relNote -match '15\.2\.9') 'v15.2.9.md mentions version' 'docs/releases/v15.2.9.md'
-    Assert-Coverage ($relNote.Length -gt 100) 'v15.2.9.md non-trivial content' 'docs/releases/v15.2.9.md'
+    Assert-Coverage ($relNote -match '15\.3\.0') 'v15.3.0.md mentions version' 'docs/releases/v15.3.0.md'
+    Assert-Coverage ($relNote.Length -gt 100) 'v15.3.0.md non-trivial content' 'docs/releases/v15.3.0.md'
 }
 $ciRaw = $contentMap['scripts/ci.ps1']
 if ($ciRaw) {
