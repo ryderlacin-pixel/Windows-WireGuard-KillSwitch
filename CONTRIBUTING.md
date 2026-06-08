@@ -29,19 +29,24 @@ Non-English issues or PRs may be closed without review.
 
 ## Scope
 
-This repo ships a single installer (`install.ps1`) that generates runtime scripts under `C:\WireGuard\` on the target machine. Keep changes minimal and consistent with the existing PowerShell style.
+- **Entry point:** `install.ps1` (orchestrator, ~70 lines)
+- **Implementation:** `lib/*.ps1` (dot-sourced modules) + `scripts/install-v14-stack.ps1`, `scripts/install-v15-privacy-stack.ps1`
+- **Runtime output:** generated scripts under `C:\WireGuard\` on the target machine
+
+When changing install behavior, update the relevant `lib/` module (or stack script), keep `install.ps1` thin, and run `.\scripts\test-suite.ps1` (164+ assertions).
 
 ## Code review
 
 Before opening a design or security question, read **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. It documents:
 
-- Responses to reviewer feedback (v10.2 → v10.4)
-- Why WMI and 8 recovery layers exist
-- Firewall model and verification commands
+- Reviewer Q&A (v10.2 → v10.4) and v11–v15 history
+- **`lib/` module map** (v15.1)
+- Why WMI and 9 recovery layers exist
+- Firewall model and verification commands (`live-smoke-test.ps1`, `safe-live-verify.ps1`)
 
 Use the **[Code review issue template](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/issues/new?template=code_review.md)** for architecture questions.
 
-After changing `install.ps1`, update `docs/CODE_REVIEW.md` and release notes in `scripts/publish-releases.ps1` if behavior changes.
+After changing install logic, update `docs/CODE_REVIEW.md`, `docs/releases/v15.x.md`, and `scripts/publish-releases.ps1` if behavior changes.
 
 ## Questions
 

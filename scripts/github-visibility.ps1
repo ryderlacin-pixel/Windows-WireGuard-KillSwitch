@@ -43,46 +43,61 @@ function Invoke-GH($Method, $Uri, $Body, [hashtable]$Hdr = $headers) {
 Write-Host "=== GitHub Visibility Setup ===" -ForegroundColor Cyan
 
 # 1. Topics
-Write-Host "[1/5] Setting topics..." -ForegroundColor Yellow
+Write-Host "[1/6] Setting topics..." -ForegroundColor Yellow
 $topics = @(
     "wireguard", "warp", "cloudflare-warp", "kill-switch", "vpn",
-    "windows", "powershell", "privacy", "firewall", "wgcf", "self-hosted"
+    "windows", "powershell", "privacy", "firewall", "wgcf", "self-hosted",
+    "dnscrypt", "tor-browser", "dns-leak-protection"
 )
 try {
     Invoke-GH PUT "https://api.github.com/repos/$Owner/$Repo/topics" @{ names = $topics } $topicHeaders
     Write-Host "  OK: $($topics -join ', ')" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
+# 1b. Repo description (About box on GitHub)
+Write-Host "[1b/6] Setting repo description..." -ForegroundColor Yellow
+$repoDescription = "Windows WireGuard kill switch + free WARP + v15.1 strong privacy (DNS lock, dnscrypt). One install.ps1, lib/ modules, 9 recovery layers."
+try {
+    Invoke-GH PATCH "https://api.github.com/repos/$Owner/$Repo" @{
+        description = $repoDescription
+        homepage    = "https://github.com/$Owner/$Repo/releases/tag/v15.1"
+    }
+    Write-Host "  OK: description updated" -ForegroundColor Green
+} catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
+
 # 2. Enable discussions
-Write-Host "[2/5] Enabling discussions..." -ForegroundColor Yellow
+Write-Host "[2/6] Enabling discussions..." -ForegroundColor Yellow
 try {
     Invoke-GH PATCH "https://api.github.com/repos/$Owner/$Repo" @{ has_discussions = $true }
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
 # 3. GitHub Releases (reviewer-focused notes)
-Write-Host "[3/5] Publishing releases..." -ForegroundColor Yellow
+Write-Host "[3/6] Publishing releases (v15.1)..." -ForegroundColor Yellow
 $publishScript = Join-Path $PSScriptRoot "publish-releases.ps1"
 if (Test-Path $publishScript) {
-    & $publishScript -Token $Token -Owner $Owner -Repo $Repo
+    & $publishScript -Token $Token -Owner $Owner -Repo $Repo -Only v15.1
 } else {
     Write-Host "  FAIL: publish-releases.ps1 not found" -ForegroundColor Red
 }
 
 # 4. Profile bio
-Write-Host "[4/5] Updating profile bio..." -ForegroundColor Yellow
+Write-Host "[4/6] Updating profile bio..." -ForegroundColor Yellow
 try {
     Invoke-GH PATCH "https://api.github.com/user" @{
-        bio = "Windows WireGuard + WARP kill switch - one PowerShell script, 8 recovery layers"
+        bio = "Windows WireGuard + WARP kill switch v15.1 — lib/ modules, DNS lock, 9 recovery layers"
     }
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
-Write-Host "[5/5] Pin repo (manual - no API)..." -ForegroundColor Yellow
+Write-Host "[5/6] Pin repo (manual - no API)..." -ForegroundColor Yellow
 Write-Host "  https://github.com/${Owner}?tab=repositories"
 Write-Host "  -> Customize pins -> Windows-WireGuard-KillSwitch"
 Write-Host ""
-Write-Host "Next: Reddit posts -> docs/PROMOTION.md"
+Write-Host "[6/6] Docs synced on main (README, PROMOTION, CODE_REVIEW, lib/)" -ForegroundColor Yellow
+Write-Host "  Push latest main before Reddit posts."
+Write-Host ""
+Write-Host "Next: Reddit posts -> docs/PROMOTION.md (v15.1)"
 Write-Host "      Full checklist -> docs/LAUNCH_CHECKLIST.md"
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green

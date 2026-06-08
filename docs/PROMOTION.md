@@ -1,120 +1,101 @@
 # Promotion — English-speaking communities only
 
-This project is maintained for an **English-speaking audience**. Use the copy below on English platforms only.
+**Current release:** [v15.1](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.1)
 
-**Do not post on:** Turkish forums, localized subreddits, or non-English tech communities.
+**Repo:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch
+
+Use **English only** on public posts. Do not post on Turkish or other non-English tech communities.
+
+---
+
+## Key message (v15.1)
+
+- **Users:** one command — `.\install.ps1`
+- **Developers:** implementation split into **`lib/`** (8 modules); orchestrator ~70 lines
+- **Default:** free WARP, strong leak/DNS/kill-switch (not max anonymity)
+- **Sensitive:** desktop **Hassas-Tarama** — one-step Tor (v15.1)
+- **Verify:** `privacy-audit.ps1` STRONG, `safe-live-verify.ps1` 77/77, offline CI 164+ assertions
 
 ---
 
 ## r/WireGuard — standalone post
 
-**Title:** `[Release] Windows WireGuard Kill Switch — one PowerShell script, anonymous WARP, 8 recovery layers (v10.1)`
+**Title:** `[Release] Windows WireGuard Kill Switch v15.1 — free WARP, DNS lock, lib/ modules, 9 recovery layers`
 
 **Body:**
 
+```markdown
+**Repo:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch  
+**Release:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.1
+
+I'm the author. One elevated `install.ps1` (orchestrator) dot-sources `lib/` modules — you still run a single command.
+
+**What it does:**
+- WireGuard + anonymous Cloudflare WARP (wgcf, no account)
+- Kill switch: firewall blocks outbound when tunnel drops
+- v15 privacy: DNS lock → 127.0.0.1, dnscrypt (Quad9), LLMNR/NetBIOS off, leak-sentinel
+- 9 recovery layers + watchdog + anti-tamper
+- Optional Tor: Hassas-Tarama desktop shortcut (auto-installs Tor if missing, v15.1)
+
+**Install:**
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1 -NoPause
 ```
-Repo: https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch
 
-One elevated PowerShell script that:
-- Installs WireGuard if missing
-- Generates an anonymous Cloudflare WARP config via wgcf (no account)
-- Applies a real kill switch (firewall blocks outbound when tunnel is down)
-- Installs 8 redundant recovery layers (monitor, repair, tasks, NSSM service, WMI, GPO, startup)
+**Honest limits:** WARP = Cloudflare is your VPN operator (~7.5–8/10 anonymity). Strong leak protection, not magic exit anonymity.
 
-Custom server mode:
-  .\install.ps1 -CustomConfig "C:\path\to\myvpn.conf"
+**Real-world:** Tested in Turkey (ISP-level blocks). Daily use on Windows 11 across reboots.
 
-v10.0 fixes a critical bug where repair killed the main monitor while the tunnel was still up.
+**Review:** docs/CODE_REVIEW.md · **164+** offline test assertions
 
-MIT licensed. No personal keys in the repo.
-
-Happy to answer questions in English.
-```
-
-**Add this paragraph** to r/WireGuard / r/selfhosted posts (real-world angle):
-
-```
-**Real-world testing:** Tested in Turkey, where many websites are blocked by government filtering at the ISP level. Cloudflare WARP + this kill switch successfully bypassed most state-level blocks in daily use, while the firewall kill switch prevented leaks when the tunnel dropped. Validated across reboots on Windows 11 — not just a lab setup.
+MIT. Questions welcome (English).
 ```
 
 ---
 
-## r/PowerShell — comment on modular-script thread (PRIORITY)
+## r/PowerShell — post or comment
 
-**Link:** https://www.reddit.com/r/PowerShell/comments/1tza2u0/refactored_a_monolithic_script_into_a_modular/
+**Title (new post):** `[Project] 3500-line installer → lib/ modules, still one install.ps1 for users (WireGuard kill switch v15.1)`
 
-**Paste this entire comment:**
+**Body:**
 
-```
-I went the opposite direction on a similar problem — one monolithic installer that *generates* modular runtime components at deploy time.
+```markdown
+Refactored production installer into 8 dot-sourced modules under `lib/` while keeping `.\install.ps1` as the only user entry point (~70-line orchestrator).
 
-**Project:** Windows WireGuard + Cloudflare WARP kill switch (PowerShell)
-**Repo:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch
-**Version:** v10.1 (production-hardened, tested across reboots on Windows 11)
+**Repo:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch  
+**Release:** https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.1
 
-### What it does
-- One `install.ps1` run as Admin — no manual WireGuard setup
-- Auto-installs WireGuard if missing
-- Generates an **anonymous** Cloudflare WARP config via `wgcf` (no email/login)
-- Applies a real **kill switch** via Windows Firewall — if the tunnel drops, outbound internet is blocked immediately
-- 8 redundant recovery layers so the tunnel/monitor come back after crash or reboot
+- `lib/Install-GeneratedScripts.ps1` — builds monitor/repair/GPO heredocs at install time
+- Offline gate: 164+ assertions (parse, heredoc extract, mutex, pattern coverage)
+- GitHub Actions CI on every push
+- Runtime output still modular under `C:\WireGuard\`
 
-### Runtime layout (modular, installed by one script)
-After install, everything lives in `C:\WireGuard\`:
-- `monitor.ps1` — main loop (5s poll, tunnel recovery)
-- `repair.ps1` — system repair
-- `service-monitor.ps1` — NSSM service wrapper
-- `wmi-repair.ps1` — WMI event consumer
-- Scheduled tasks: `WG-KillSwitch`, `WG-RepairTask`
-- Windows service: `WGKillSwitchSvc`
-- GPO boot script + startup shortcut + registry guard
-
-### Custom server support
-```powershell
-.\install.ps1 -CustomConfig "C:\path\to\myvpn.conf"
-.\install.ps1 -CustomConfig "..." -CustomTunnel "myvpn" -CustomEndpointIP "1.2.3.4/32" -CustomPort 51820
+Happy to discuss heredoc testing, WMI self-healing, or install-safe upgrade paths.
 ```
 
-### v10.0 — critical bug we fixed
-Process detection used to match `service-monitor.ps1` when looking for `monitor.ps1` (substring match). Repair killed the *real* monitor while the tunnel was still up → kill switch dead. Fix: strict regex `(?:\\|/)monitor\.ps1(?:\s|"|$)` everywhere.
-
-Also: false firewall "policy corrected" spam, battery-mode tasks, repair cooldown storms, dual tunnel health check.
-
-### Privacy
-No personal data in the repo. WARP registration is anonymous. Keys/configs stay local.
-
-### Kill switch behavior
-| State | Result |
-|-------|--------|
-| Tunnel up | Normal internet via VPN |
-| Tunnel down | Outbound blocked on Wi-Fi/Ethernet |
-| Reboot | Block active until tunnel confirmed running |
-
-MIT licensed. Happy to answer questions.
-```
+**Comment thread (optional):** https://www.reddit.com/r/PowerShell/comments/1tza2u0/refactored_a_monolithic_script_into_a_modular/
 
 ---
 
 ## r/selfhosted — short post
 
-**Title:** `Automated Windows WireGuard + WARP kill switch with 8 recovery layers`
+**Title:** `Windows WireGuard + WARP kill switch v15.1 — DNS lock, dnscrypt, 9 recovery layers`
 
-**Body:** Same as r/WireGuard, add privacy angle (anonymous WARP, no email, firewall leak protection).
+**Body:** Same as r/WireGuard post; emphasize automation, recovery layers, and `live-smoke-test.ps1` post-install gate.
 
 ---
 
 ## awesome-wireguard PR
 
-Add one line under a **Windows** or **Tools** section:
-
 ```markdown
-- [Windows-WireGuard-KillSwitch](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch) — One-script WireGuard + WARP setup with firewall kill switch and 8 recovery layers for Windows.
+- [Windows-WireGuard-KillSwitch](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch) — One-command WireGuard + free WARP kill switch for Windows (v15.1: `lib/` modules, DNS lock, dnscrypt, 9 recovery layers).
 ```
 
 ---
 
 ## Hacker News (optional)
 
-**Title:** `Show HN: Windows WireGuard kill switch – one PowerShell script, 8 recovery layers`
+**Title:** `Show HN: Windows WireGuard kill switch v15.1 – lib/ modules, one install.ps1, strong privacy stack`
 
-Keep the first comment technical and concise. Reply in English only.
+Keep first comment technical: lib split, WARP-first, honest anonymity limits, link to CODE_REVIEW.md.

@@ -7,7 +7,7 @@
 ![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
 ![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
 
-> **One script. Full kill switch. Strong privacy stack (v15).**
+> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Strong privacy (v15.1).**
 
 Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1).
 
@@ -21,7 +21,7 @@ Automatically installs WireGuard on Windows with a hardened kill switch and **v1
 
 **Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
 
-**CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse, compile, 52 assertions × 3, mutex tests (no WireGuard/admin required).
+**CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse `install.ps1` + `lib/*.ps1` + scripts, **164+ offline assertions** (×3 in `run-all-tests.ps1`), mutex tests (no WireGuard/admin required).
 
 **Security check (after install):** run `scripts\security-audit.ps1` as Administrator — IP leak, DNS leak, IPv6, kill switch simulation.
 
@@ -31,10 +31,27 @@ Automatically installs WireGuard on Windows with a hardened kill switch and **v1
 
 ## Architecture
 
+**Source (repo):** thin orchestrator + modules — users still run only `.\install.ps1`.
+
 ```mermaid
 flowchart TB
-  install["install.ps1"] --> tunnel["WireGuard Tunnel"]
-  install --> firewall["Firewall Rules KS-*"]
+  install["install.ps1 orchestrator"]
+  lib["lib/*.ps1 modules"]
+  v14["install-v14-stack.ps1"]
+  v15["install-v15-privacy-stack.ps1"]
+  install --> lib
+  install --> v14
+  install --> v15
+  lib --> gen["Install-GeneratedScripts.ps1"]
+  gen --> runtime["C:\\WireGuard\\ runtime scripts"]
+```
+
+**Runtime (after install):**
+
+```mermaid
+flowchart TB
+  install["install.ps1 done"] --> tunnel["WireGuard Tunnel"]
+  install --> firewall["Firewall KS-* + v15 DNS lock"]
   install --> layers["9 Recovery Layers"]
   layers --> monitor["monitor.ps1"]
   layers --> repair["repair.ps1"]
@@ -44,6 +61,21 @@ flowchart TB
   monitor -->|"tunnel down"| block["Block Internet"]
   monitor -->|"tunnel up"| open["Open Internet"]
 ```
+
+### Repository layout (v15.1)
+
+| Path | Purpose |
+|------|---------|
+| [`install.ps1`](install.ps1) | Entry point (~70 lines): dot-sources `lib/`, runs install or upgrade flags |
+| [`lib/Install-Constants.ps1`](lib/Install-Constants.ps1) | Paths, service names, version `15.1` |
+| [`lib/Install-Helpers.ps1`](lib/Install-Helpers.ps1) | Logging, mutex, Test-Internet, tunnel/WMI helpers |
+| [`lib/Install-Privacy.ps1`](lib/Install-Privacy.ps1) | Browser/telemetry policies, integrity vault |
+| [`lib/Install-UpgradePaths.ps1`](lib/Install-UpgradePaths.ps1) | `-StrongPrivacyUpgrade` and phased upgrades |
+| [`lib/Install-MainSteps-0-6.ps1`](lib/Install-MainSteps-0-6.ps1) | WireGuard, firewall, tunnel (STEP 0–6) |
+| [`lib/Install-GeneratedScripts.ps1`](lib/Install-GeneratedScripts.ps1) | Builds `monitor.ps1`, `repair.ps1`, guards |
+| [`lib/Install-TasksAndWmi.ps1`](lib/Install-TasksAndWmi.ps1) | Tasks, NSSM, WMI, GPO boot script |
+| [`lib/Install-MainSteps-18-20.ps1`](lib/Install-MainSteps-18-20.ps1) | v14/v15 privacy stacks, activation, final check |
+| [`scripts/`](scripts/) | Audits, CI, `live-smoke-test.ps1`, `ensure-tor-sensitive.ps1` |
 
 ---
 
@@ -196,22 +228,25 @@ Custom settings are baked into generated `monitor.ps1`, `repair.ps1`, and GPO sc
 
 ---
 
-## Recovery layers (8 total)
+## Recovery layers (9 core + watchdog + anti-tamper)
 
 If anything goes wrong (crash, update, kill), the system recovers automatically:
 
 | Layer | Description |
 |-------|-------------|
-| **monitor.ps1** | Main loop — checks tunnel every 5s, recovers if down |
-| **repair.ps1** | System repair script — restarts missing components |
-| **WG-KillSwitch** | Scheduled task, runs at boot (60s delay) + restarts on failure |
-| **WG-RepairTask** | Scheduled task, runs at boot (30s delay) + every 5 minutes |
+| **monitor.ps1** | Main loop — checks tunnel every 2–5s, recovers if down |
+| **repair.ps1** | System repair — restarts missing components every 2 min |
+| **WG-KillSwitch** | Scheduled task, boot (60s delay) + restarts on failure |
+| **WG-RepairTask** | Scheduled task, boot (30s delay) + every 2 min |
 | **WGKillSwitchSvc** | Windows service via NSSM, delayed-auto-start |
-| **WMI Subscription** | Watches for powershell.exe death, triggers repair |
+| **WMI Subscription** | Watches powershell/pwsh death, triggers repair |
 | **Startup shortcut** | `C:\ProgramData\...\StartUp\WGKillSwitch.lnk` |
 | **GPO Boot Script** | Machine startup script via Group Policy |
+| **WG-RebootVerify** | Post-reboot audit ~5 min after boot |
+| **WG-InternetWatchdog** | Auto-unbrick if blocks stuck (every 1–3 min) |
+| **anti-tamper.ps1** | Silent restore from `WGKillSwitchGuard` vault |
 
-All layers are installed by `install.ps1`. Nothing needs to be done manually.
+Installed by `install.ps1` (orchestrator + `lib/`). Nothing manual after first run.
 
 ---
 
@@ -229,6 +264,11 @@ All layers are installed by `install.ps1`. Nothing needs to be done manually.
 | `nssm.exe` | Service manager |
 | `wgcf.exe` | WARP config generator (WARP mode only) |
 | `WG-KillSwitch-backup.xml` | Task backup for self-repair |
+| `sensitive-mode.ps1` | One-step Hassas-Tarama launcher (v15.1) |
+| `ensure-tor-sensitive.ps1` | Auto-install + harden Tor if missing |
+| `dns-lockdown-guard.ps1` | System DNS → 127.0.0.1 (v15) |
+| `dnscrypt-guard.ps1` | dnscrypt-proxy health (v14+) |
+| `leak-sentinel.ps1` | Read-only leak probe (v14+) |
 
 All files except the log are hidden/system-flagged and ACL-protected.
 

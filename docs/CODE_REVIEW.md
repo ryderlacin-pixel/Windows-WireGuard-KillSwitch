@@ -50,7 +50,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 | `Test-Internet` single-host / OR-only | **Fixed in v10.7** | 2-of-3 hosts (1.1.1.1, 1.0.0.1, 8.8.8.8) |
 | Task Scheduler `P9999D` repetition duration fails on some builds | **Fixed** | `RepetitionDuration = 3650 days` (10 years) |
 | WMI looks like overkill / security risk | **By design** | See [Why WMI?](#why-wmi) below |
-| 1200-line monolithic script | **Acknowledged** | Single-file installer is intentional — generates runtime scripts to `C:\WireGuard\`; see [Why one file?](#why-one-file) |
+| 3500-line monolithic script | **Fixed in v15.1** | Split into `lib/*.ps1`; `install.ps1` orchestrator ~70 lines — see [Why lib/ modules?](#why-lib-modules-not-one-3500-line-file) |
 | `SilentlyContinue` hides real errors | **Partial** | Install-time errors use `Write-Err` + `exit 1` on critical paths; runtime scripts use silent continue to avoid monitor crash loops |
 
 ---
@@ -73,20 +73,33 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 ---
 
-## Why one file?
+## Why lib/ modules (not one 3500-line file)?
 
-**Question:** "Why not split into modules?"
+**Question:** "Why is `install.ps1` still one command if you split the code?"
 
-**Answer:** The repo ships **one copy-paste installer** for non-developers. `install.ps1`:
-1. Downloads WireGuard / wgcf / NSSM
-2. Writes `monitor.ps1`, `repair.ps1`, `wmi-repair.ps1`, `service-monitor.ps1` to `C:\WireGuard\`
-3. Registers tasks, service, WMI, firewall, GPO boot script
+**Answer (v15.1):**
 
-Splitting into modules would require a build step or multiple files users must keep together. The generated runtime scripts under `C:\WireGuard\` are the modular output.
+| Audience | Experience |
+|----------|------------|
+| **End user** | Still runs only `.\install.ps1` — clone repo, one elevated command |
+| **Reviewer** | Reads `install.ps1` (~70 lines) + `lib/*.ps1` (~3200 lines) + `scripts/install-v14|v15-*.ps1` |
+
+`install.ps1` dot-sources `lib/` in a fixed order, then calls `Invoke-InstallMainSteps0to6`, `Invoke-InstallGeneratedScripts`, etc. Generated runtime scripts under `C:\WireGuard\` (monitor, repair, guards) are still produced at install time — that modular output is unchanged since v10.
 
 ---
 
-## Architecture (what runs after install)
+## Architecture (source repo vs runtime)
+
+**Repo (v15.1):**
+
+```
+install.ps1 (orchestrator)
+    ├── lib/Install-*.ps1 (dot-sourced)
+    ├── scripts/install-v14-stack.ps1
+    └── scripts/install-v15-privacy-stack.ps1
+```
+
+**Target machine (after install):**
 
 ```
 install.ps1 (run once)
