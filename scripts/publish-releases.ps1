@@ -80,6 +80,7 @@ $releases = @{
     "v11.0" = @{ name = "v11.0 - Ultimate hardening + stress gate" }
     "v11.1" = @{ name = "v11.1 - Monitor singleton fix" }
     "v11.2" = @{ name = "v11.2 - Post-reboot auto-verify (production)" }
+    "v15.0" = @{ name = "v15.0 - Strong Privacy Stack (DNS lock, network hardening, leak-sentinel v15)" }
 }
 
 function Get-ReleaseBody($tag) {
