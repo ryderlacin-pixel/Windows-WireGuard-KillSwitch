@@ -85,7 +85,7 @@ if (Test-Path $publishScript) {
 Write-Host "[4/6] Updating profile bio..." -ForegroundColor Yellow
 try {
     Invoke-GH PATCH "https://api.github.com/user" @{
-        bio = "Windows WireGuard + WARP kill switch v15.1 — lib/ modules, DNS lock, 9 recovery layers"
+        bio = "Windows WireGuard + WARP kill switch v15.1 - lib modules, DNS lock, 9 recovery layers"
     }
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
