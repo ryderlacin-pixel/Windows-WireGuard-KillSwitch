@@ -30,8 +30,8 @@ Write-Host "`n>> Version consistency" -ForegroundColor Yellow
 $constants = Get-Content (Join-Path $repoRoot 'lib\Install-Constants.ps1') -Raw -Encoding UTF8
 $install   = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -match "\`$WG_KS_VERSION = '([^']+)'") { $ver = $Matches[1] } else { $ver = '' }
-Assert-Gate ($ver -eq '15.2.7') "WG_KS_VERSION = 15.2.7 (got '$ver')"
-Assert-Gate ($install -match 'v15\.2\.7') 'install.ps1 header version'
+Assert-Gate ($ver -eq '15.2.8') "WG_KS_VERSION = 15.2.8 (got '$ver')"
+Assert-Gate ($install -match 'v15\.2\.8') 'install.ps1 header version'
 Assert-Gate ($constants -notmatch 'Ã¢â‚¬') 'Install-Constants.ps1: no mojibake'
 
 # 3) Critical code-review invariants (static)
@@ -64,7 +64,7 @@ Assert-Gate ($emerBat -match '^@echo off') 'emergency-reset.bat is real batch fi
 
 # 4) Release notes exist for current version
 Write-Host "`n>> Release artifact" -ForegroundColor Yellow
-Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.2.7.md')) 'docs/releases/v15.2.7.md exists'
+Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.2.8.md')) 'docs/releases/v15.2.8.md exists'
 
 Write-Host ''
 if ($failures.Count -eq 0) {

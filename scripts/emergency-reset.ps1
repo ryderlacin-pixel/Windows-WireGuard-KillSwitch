@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 # WG Kill Switch - one-click emergency network recovery (v15.2)
-param([switch]$NoPause)
+param([switch]$NoPause, [switch]$DeepReset)
 $ErrorActionPreference = 'Continue'
 $log = 'C:\WireGuard\emergency-reset.log'
 
@@ -11,6 +11,15 @@ function Write-Log([string]$m) {
 }
 
 Write-Log '=== EMERGENCY RESET START ==='
+
+foreach ($tn in @('\WG-KillSwitch', '\WG-RepairTask', '\WG-InternetWatchdog', '\WG-RebootVerify')) {
+    schtasks /End /TN $tn 2>$null | Out-Null
+    schtasks /Change /TN $tn /DISABLE 2>$null | Out-Null
+}
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -EA SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'monitor\.ps1|repair\.ps1|internet-watchdog|anti-tamper' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
+& sc.exe stop WGKillSwitchSvc 2>$null | Out-Null
 
 Write-Log 'Removing KS-* firewall rules...'
 $removed = 0
@@ -30,12 +39,15 @@ Get-NetFirewallRule -DisplayName 'KS-*' -EA SilentlyContinue | ForEach-Object {
 }
 Write-Log "Removed $removed KS rule references"
 
-Write-Log 'Resetting Windows Firewall...'
-netsh advfirewall reset 2>$null | Out-Null
-
-Write-Log 'Resetting IP stack and Winsock...'
-netsh int ip reset 2>$null | Out-Null
-netsh winsock reset 2>$null | Out-Null
+if ($DeepReset) {
+    Write-Log 'DeepReset: resetting Windows Firewall...'
+    netsh advfirewall reset 2>$null | Out-Null
+    Write-Log 'DeepReset: resetting IP stack and Winsock (reboot required)...'
+    netsh int ip reset 2>$null | Out-Null
+    netsh winsock reset 2>$null | Out-Null
+} else {
+    Write-Log 'Skipping full firewall/IP/winsock reset (use -DeepReset only if still broken after reboot)'
+}
 
 Write-Log 'Re-enabling physical adapters and bindings...'
 $tunnelPatterns = @('WireGuard', 'wintun', 'Wintun', 'AllDebrid')
@@ -58,10 +70,14 @@ foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
 
 try {
     New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'UnbrickUntil' (Get-Date).AddMinutes(30).ToString('o') -Force
-    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'BootGraceUntil' (Get-Date).AddMinutes(30).ToString('o') -Force
+    $grace = (Get-Date).AddMinutes(30).ToString('o')
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'UnbrickUntil' $grace -Force
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'BootGraceUntil' $grace -Force
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'PostInstallGraceUntil' $grace -Force
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'DnsLockdownState' 'DEFERRED' -Force
     Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
 } catch {}
+Clear-DnsClientCache -EA SilentlyContinue
 
 Write-Log '=== EMERGENCY RESET COMPLETE - reboot recommended ==='
 Write-Host ''

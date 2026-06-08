@@ -65,7 +65,9 @@ Write-Step "STEP 18f - V15 STRONG PRIVACY STACK"
 if (Get-Command Invoke-V15StrongPrivacyStack -EA SilentlyContinue) {
     try { Invoke-V15StrongPrivacyStack } catch { WARN "v15 strong privacy stack failed: $_" }
     if (Get-Command Test-V15DnsLockdownHealthy -EA SilentlyContinue) {
-        if (Test-V15DnsLockdownHealthy) { OK "System DNS lock: all adapters 127.0.0.1" }
+        if ((Get-Command Test-InstallInProgress -EA SilentlyContinue) -and (Test-InstallInProgress)) {
+            WARN 'System DNS lock: deferred until install completes (internet protected)'
+        } elseif (Test-V15DnsLockdownHealthy) { OK "System DNS lock: all adapters 127.0.0.1" }
         else { WARN "System DNS lock: incomplete (guard will retry)" }
     }
     if (Get-Command Test-V15NetworkPrivacyHealthy -EA SilentlyContinue) {
@@ -96,9 +98,9 @@ if (Test-Path $NSSM) {
 }
 Stop-AllMonitorProcs
 Remove-Item "$INSTALL_DIR\monitor.pid" -Force -EA SilentlyContinue
-Start-Sleep 2
+Write-Info "Monitor start delayed 45s (post-install stability window)..."
+Start-Sleep -Seconds 45
 Start-HiddenScript $MONITOR_PS1
-Start-Sleep 3
 Start-Sleep 5
 if (-not (Test-SafeToOpen)) {
     Remove-InstallBlocks

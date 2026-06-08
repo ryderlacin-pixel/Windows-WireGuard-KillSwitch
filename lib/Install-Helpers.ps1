@@ -243,6 +243,32 @@ function Test-DnscryptListening {
     return ($net -match '127\.0\.0\.1:53\s+.*LISTENING')
 }
 
+function Restore-DhcpDnsOnPhysicalAdapters {
+    $tunnelPatterns = @('WireGuard', 'wintun', 'Wintun', 'AllDebrid')
+    $fixed = 0
+    foreach ($a in (Get-NetAdapter -EA SilentlyContinue)) {
+        $isTunnel = $false
+        foreach ($p in $tunnelPatterns) {
+            if ("$($a.Name) $($a.InterfaceDescription)" -match [regex]::Escape($p)) { $isTunnel = $true; break }
+        }
+        if ($isTunnel) { continue }
+        netsh interface ipv4 set dnsservers name="$($a.Name)" source=dhcp 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $fixed++ }
+    }
+    Clear-DnsClientCache -EA SilentlyContinue
+    return $fixed
+}
+
+function Test-InstallHealthStable {
+    param([int]$Checks = 3, [int]$IntervalSec = 10)
+    if (-not (Get-Command Test-SafeToOpen -ErrorAction SilentlyContinue)) { return $true }
+    for ($i = 1; $i -le $Checks; $i++) {
+        if (-not (Test-SafeToOpen)) { return $false }
+        if ($i -lt $Checks) { Start-Sleep -Seconds $IntervalSec }
+    }
+    return $true
+}
+
 function Invoke-DeferredPrivacyGuards {
     if (Test-InstallInProgress) {
         WARN 'Privacy guards deferred: install still in progress'
@@ -256,11 +282,9 @@ function Invoke-DeferredPrivacyGuards {
         WARN 'Privacy guards deferred: dnscrypt not listening on 127.0.0.1:53 (repair will retry)'
         return
     }
-    if (Get-Command Test-SafeToOpen -ErrorAction SilentlyContinue) {
-        if (-not (Test-SafeToOpen)) {
-            WARN 'Privacy guards deferred: tunnel+internet not healthy yet (repair will retry)'
-            return
-        }
+    if (-not (Test-InstallHealthStable)) {
+        WARN 'Privacy guards deferred: tunnel+internet not stable for 30s (repair will retry)'
+        return
     }
     if (Get-Command Unlock-WireGuardConfigForWrite -ErrorAction SilentlyContinue) {
         Unlock-WireGuardConfigForWrite

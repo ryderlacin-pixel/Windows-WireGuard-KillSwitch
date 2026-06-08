@@ -379,6 +379,17 @@ function Test-BlockAllowed {
     return `$true
 }
 
+function Restore-DhcpDnsOnPhysicalAdapters {
+    `$fixed = 0
+    foreach (`$a in (Get-NetAdapter -EA SilentlyContinue)) {
+        if (-not (Assert-AdapterMutationAllowed `$a.Name `$a.InterfaceDescription 'dns-restore')) { continue }
+        netsh interface ipv4 set dnsservers name="`$(`$a.Name)" source=dhcp 2>`$null | Out-Null
+        if (`$LASTEXITCODE -eq 0) { `$fixed++ }
+    }
+    Clear-DnsClientCache -EA SilentlyContinue
+    return `$fixed
+}
+
 function Disable-KillSwitchBlock {
     foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
         netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null

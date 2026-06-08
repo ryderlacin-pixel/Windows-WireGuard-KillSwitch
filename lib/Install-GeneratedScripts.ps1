@@ -272,6 +272,10 @@ function Invoke-EmergencyUnbrick {
     Log "EMERGENCY UNBRICK: deep gentle unbrick (protection stays installed)"
     Disable-Block
     Disable-DnsLeakProtection
+    if (-not (Test-TunnelRunning)) {
+        `$n = Restore-DhcpDnsOnPhysicalAdapters
+        if (`$n -gt 0) { Log "Fail-open DNS: restored DHCP on `$n adapter(s)" }
+    }
     Clear-DnsClientCache -EA SilentlyContinue
     Remove-Item 'C:\WireGuard\install.inprogress' -Force -EA SilentlyContinue
     New-Item -Path `$REG_KEY -Force | Out-Null
@@ -1077,6 +1081,10 @@ function Test-BlockRulePresent {
 }
 function Invoke-GentleUnbrick {
     Disable-KillSwitchBlock
+    if (-not (Test-TunnelRunning)) {
+        `$n = Restore-DhcpDnsOnPhysicalAdapters
+        if (`$n -gt 0) { Log "Watchdog fail-open DNS: restored DHCP on `$n adapter(s)" }
+    }
     Clear-DnsClientCache -EA SilentlyContinue
 }
 function Invoke-DeepUnbrick {
