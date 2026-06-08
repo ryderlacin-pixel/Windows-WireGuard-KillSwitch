@@ -84,6 +84,7 @@ $releases = @{
     "v15.1" = @{ name = "v15.1 - Quality 95+ (lib modules, WARP-first docs, one-step Tor)" }
     "v15.2" = @{ name = "v15.2 - Boot-safety emergency fix (90s window, DHCP exempt, emergency-reset)" }
     "v15.2.1" = @{ name = "v15.2.1 - DryRun completeness fix (safe install preview)" }
+    "v15.2.2" = @{ name = "v15.2.2 - Invoke-SafeRegistrySet splat fix (STEP 4 install)" }
 }
 
 function Get-ReleaseBody($tag) {

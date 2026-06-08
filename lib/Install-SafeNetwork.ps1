@@ -73,20 +73,29 @@ function Invoke-SafeNetsh {
 }
 
 function Invoke-SafeRegistrySet {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][hashtable]$Params,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$Value,
+        $Type,
+        [switch]$Force,
         [string]$Reason = ''
     )
     $detail = if ($Reason) { " ($Reason)" } else { '' }
     if ($script:InstallDryRun) {
-        $path = [string]$Params.Path
-        $name = [string]$Params.Name
-        $val  = $Params.Value
-        $typ  = if ($Params.Type) { [string]$Params.Type } else { 'default' }
-        Write-SafeActionLog "Would set registry ${path}\${name} = $val (type $typ)$detail"
+        $typStr = if ($PSBoundParameters.ContainsKey('Type')) { [string]$Type } else { 'default' }
+        Write-SafeActionLog "Would set registry ${Path}\${Name} = $Value (type $typStr)$detail"
         return
     }
-    Set-ItemProperty @Params
+    $setArgs = @{
+        Path  = $Path
+        Name  = $Name
+        Value = $Value
+    }
+    if ($PSBoundParameters.ContainsKey('Type')) { $setArgs.Type = $Type }
+    if ($Force) { $setArgs.Force = $true }
+    Set-ItemProperty @setArgs
 }
 
 function Get-LocalGatewaySubnets {
