@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v15 privacy audit — read-only tier scoring (STRONG / MEDIUM / WEAK)
+# v15 privacy audit - read-only tier scoring (STRONG / MEDIUM / WEAK)
 $ErrorActionPreference = 'Continue'
 $REG = 'HKLM:\SOFTWARE\WGKillSwitch'
 $pass = 0

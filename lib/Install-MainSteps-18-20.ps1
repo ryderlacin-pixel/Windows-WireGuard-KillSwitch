@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 - Install-MainSteps-18-20.ps1 (v15.1)
+# Dot-sourced from install.ps1 - Install-MainSteps-18-20.ps1 (v15.2.9 - FIXED: no early catch-all blocks, dnscrypt guard for DNS lock)
 #Requires -Version 5.1
 
 function Invoke-InstallMainSteps18to20 {
@@ -67,6 +67,8 @@ if (Get-Command Invoke-V15StrongPrivacyStack -EA SilentlyContinue) {
     if (Get-Command Test-V15DnsLockdownHealthy -EA SilentlyContinue) {
         if ((Get-Command Test-InstallInProgress -EA SilentlyContinue) -and (Test-InstallInProgress)) {
             WARN 'System DNS lock: deferred until install completes (internet protected)'
+        } elseif (Get-Command Test-DnscryptListening -EA SilentlyContinue -and -not (Test-DnscryptListening)) {
+            WARN 'System DNS lock: deferred (dnscrypt-proxy not listening on 127.0.0.1:53 yet - guard will retry)'
         } elseif (Test-V15DnsLockdownHealthy) { OK "System DNS lock: all adapters 127.0.0.1" }
         else { WARN "System DNS lock: incomplete (guard will retry)" }
     }

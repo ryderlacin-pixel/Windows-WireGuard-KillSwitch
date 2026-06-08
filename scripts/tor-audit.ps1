@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v14 Tor audit — read-only, never starts/stops Tor Browser.
+# v14 Tor audit - read-only, never starts/stops Tor Browser.
 $ErrorActionPreference = 'Continue'
 $REG = 'HKLM:\SOFTWARE\WGKillSwitch'
 $pass = 0

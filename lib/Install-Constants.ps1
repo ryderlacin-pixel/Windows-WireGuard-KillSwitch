@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 - Install-Constants.ps1 (v15.1 modular split)
+# Dot-sourced from install.ps1 - Install-Constants.ps1 (v15.2.9 modular split - FIXED)
 #Requires -Version 5.1
 $WG_KS_VERSION = '15.2.9'
 

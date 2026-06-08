@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# CI entry point — offline quality gate (no admin, no WireGuard, no network required)
+# CI entry point - offline quality gate (no admin, no WireGuard, no network required)
 # Used by GitHub Actions and local pre-push verification.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -65,6 +65,18 @@ if ($fail -eq 0) {
             Write-Host "  [OK] $($f.Name)" -ForegroundColor Green
         }
     }
+}
+
+if ($fail -eq 0) {
+    Write-Step 'Phase 4/5 - file-coverage-test.ps1 (per-file anti-hollow gate)'
+    & (Join-Path $PSScriptRoot 'file-coverage-test.ps1')
+    if ($LASTEXITCODE -ne 0) { $fail = 1 }
+}
+
+if ($fail -eq 0) {
+    Write-Step 'Phase 5/5 - final-line-audit.ps1 (every file dot-by-dot, 0 ERROR)'
+    & (Join-Path $PSScriptRoot 'final-line-audit.ps1')
+    if ($LASTEXITCODE -ne 0) { $fail = 1 }
 }
 
 if ($fail -eq 0) {

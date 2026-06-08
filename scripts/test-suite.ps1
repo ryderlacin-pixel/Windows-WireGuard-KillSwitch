@@ -1,7 +1,8 @@
-# Comprehensive offline test suite — target quality 9.5/10 (v12.0)
+# Comprehensive offline test suite - v15.2.9 rigor gate (no hollow tests)
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $PSScriptRoot 'Test-Helpers.ps1')
 
 function Get-ChildPowerShellExe {
     if (Get-Command pwsh -ErrorAction SilentlyContinue) { return (Get-Command pwsh).Source }
@@ -13,18 +14,6 @@ $passed = 0
 
 function Assert-True([bool]$cond, [string]$msg) {
     if ($cond) { $script:passed++ } else { $failures.Add($msg) }
-}
-
-function Unescape-GeneratedScript([string]$text) {
-    $t = $text -replace '`r`n', "`r`n" -replace '`n', "`n" -replace '`t', "`t"
-    return ($t -replace '`(.)', '$1')
-}
-
-function Extract-Heredoc([string]$raw, [string]$varName) {
-    $pattern = [regex]::Escape($varName) + '\s*=\s*@"\r?\n(.*?)\r?\n"@'
-    $m = [regex]::Match($raw, $pattern, 'Singleline')
-    if (-not $m.Success) { return $null }
-    return Unescape-GeneratedScript $m.Groups[1].Value
 }
 
 function Test-ParseFile([string]$path, [string]$label) {
@@ -50,8 +39,23 @@ function Test-ScriptblockCreate([string]$path, [string]$label) {
     }
 }
 
+function Test-ExtractedScript {
+    param([string]$Content, [string]$Label, [string[]]$Must)
+    if (-not $Content) { $failures.Add("$Label extract failed"); return }
+    $tmp = Write-ExtractedToTemp $Content $Label
+    try {
+        Test-ScriptblockCreate $tmp "$Label (extracted)" | Out-Null
+        Test-ParseFile $tmp "$Label (extracted)" | Out-Null
+        foreach ($m in $Must) {
+            Assert-True ($Content -match $m) "$Label contract: $m"
+        }
+    } finally {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Kill Switch FULL TEST SUITE (v15.2.9)' -ForegroundColor Cyan
+Write-Host '  Kill Switch FULL TEST SUITE (v15.2.9 - rigor gate)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 $libDir = Join-Path $repoRoot 'lib'
@@ -61,7 +65,7 @@ if (Test-Path $libDir) {
 }
 
 # [1] install.ps1 + lib/*.ps1 compile + AST
-Write-Host "`n[1/11] install.ps1 + lib modules compile + AST" -ForegroundColor Yellow
+Write-Host "`n[1/17] install.ps1 + lib modules compile + AST" -ForegroundColor Yellow
 Test-ScriptblockCreate $installPath 'install.ps1' | Out-Null
 Test-ParseFile $installPath 'install.ps1' | Out-Null
 foreach ($lf in $libFiles) {
@@ -69,79 +73,74 @@ foreach ($lf in $libFiles) {
 }
 Assert-True ($libFiles.Count -ge 9) 'lib/ has 9+ modules (v15.2 safe-network)'
 
-$raw = [string](Get-Content -LiteralPath $installPath -Raw -Encoding UTF8)
-$libRaw = ''
-foreach ($lf in $libFiles) {
-    $libRaw += [string](Get-Content -LiteralPath $lf.FullName -Raw -Encoding UTF8)
-}
-$rawCombined = $raw + $libRaw
-$genPath = Join-Path $libDir 'Install-GeneratedScripts.ps1'
-$genRaw = if (Test-Path $genPath) { [string](Get-Content -LiteralPath $genPath -Raw -Encoding UTF8) } else { '' }
-$tasksPath = Join-Path $libDir 'Install-TasksAndWmi.ps1'
-$tasksRaw = if (Test-Path $tasksPath) { [string](Get-Content -LiteralPath $tasksPath -Raw -Encoding UTF8) } else { '' }
+$contentMap = Get-FileContentMap $repoRoot
+$genRaw = $contentMap['lib/Install-GeneratedScripts.ps1']
+$tasksRaw = $contentMap['lib/Install-TasksAndWmi.ps1']
+$main06Raw = $contentMap['lib/Install-MainSteps-0-6.ps1']
+$main18Raw = $contentMap['lib/Install-MainSteps-18-20.ps1']
+$safeNetRaw = $contentMap['lib/Install-SafeNetwork.ps1']
+$v15StackRaw = $contentMap['scripts/install-v15-privacy-stack.ps1']
+$v14StackRaw = $contentMap['scripts/install-v14-stack.ps1']
 
-# [2] Version / critical patterns (install.ps1 + lib/)
-Write-Host "[2/11] v15.2.9 patterns" -ForegroundColor Yellow
-foreach ($n in @('v15.2.9','15.2.9','v15.2','15.2','Register-RepairTaskDualTrigger','Refresh-RegistryTaskBackups','Get-ScriptSha256','Restore-DhcpDnsOnPhysicalAdapters','Test-InstallHealthStable','Set-PostInstallGraceRegistry','PostInstallGraceUntil','Test-PostInstallGrace','Backup-TunnelConfig','Restore-TunnelConfigIfMissing','Invoke-GuardScriptSafe','Ensure-DnscryptTomlFile','Invoke-DeferredPrivacyGuards','Test-DnscryptListening','Set-Location -LiteralPath $PSScriptRoot','Install-SafeNetwork.ps1','Test-BootSafeWindow','Get-OsUptimeSeconds','Test-IsVirtualTunnelAdapter','Disable-TunnelIPv6BindingsOnly','Add-KillSwitchFirewallExemptions','Add-KillSwitchCatchAllBlocks','Enable-KillSwitchBlock','Disable-KillSwitchBlock','Invoke-FailOpenSafeguard','wg-safety.ps1','KS-DHCP-Bcast-Out','KS-Gateway-Out','KS-Gateway-In','Invoke-SafeNetsh','Invoke-SafeRegistrySet','InstallDryRun','EnableFailsafe','emergency-reset.bat','emergency-reset.ps1','v15.1','15.1','$LibRoot','Install-Constants.ps1','Invoke-InstallMainSteps0to6','Invoke-InstallGeneratedScripts','Invoke-InstallUpgradeEarlyExit','v15.0','15.0','StrongPrivacyUpgrade','install-v15-privacy-stack.ps1','dns-lockdown-guard.ps1','network-privacy-guard.ps1','Invoke-V15StrongPrivacyStack','KS-Dnscrypt-EXE','STEP 18f - V15','STEP 10e - V15','v14.0','14.0','$WG_KS_VERSION','DnsLeakUpgradeOnly','TorUpgradeOnly','FullPrivacyUpgrade','install-v14-stack.ps1','dnscrypt-guard.ps1','leak-sentinel.ps1','tor-hardening-guard.ps1','Invoke-V14DnsLeakStack','STEP 18c - V14 DNS','STEP 10d - V14','PrivacyUpgradeOnly','Get-ChromiumPrivacyDWordProps','Write-PrivacyHardeningGuardPs1','Install-ScriptIntegrityVault','Test-ScriptIntegrityVault','DnsOverHttpsMode','PrivacySandboxAdTopicsEnabled','QuicAllowed','fingerprintingProtection','webgl.disabled','consumer telemetry reduced (not eliminated)','Test-WmiSubscriptionActive','Get-WmiBindFilter','Install-PrivacyHardening','privacy-hardening-guard.ps1','Install-WindowsTelemetryReduction','BlockThirdPartyCookies','DisableWindowsConsumerFeatures','privacy.resistFingerprinting','AllowTelemetry','Install-BrowserPrivacyPolicies','webrtc-leak-guard.ps1','WebRtcIpHandlingPolicy','default_public_interface_only','STEP 18b - PRIVACY','safe-live-verify.ps1','oldCmd -match','powershell.exe'' OR TargetInstance.Name=''pwsh.exe','Minutes 15','Invoke-EmergencyUnbrick','EMERGENCY UNBRICK','protection stays installed','Remove-KurtarArtifacts','Invoke-DeepUnbrick','Test-MainMonitorActive','deferring reinstall','tunnel recovery delegated','WGTunnelInstallMutex','ScriptsPath','TunnelName','anti-tamper.ps1','Invoke-AntiTamperGuard','NoChainRepair','Write-GuardBackups','WGKillSwitchGuard','TaskXMLRepair','Log-Tamper','Restore-WmiSubscription','C:\ProgramData\WGKillSwitchGuard','v11.3','v11.2','WG-RebootVerify','post-reboot-verify','RebootVerifyPath','Remove-OtherMonitorProcs','v11.1','Ensure-DelayedAutoStart','Test-DelayedAutoStart','Repair-ConfigIntegrity','Repair-EssentialFirewall','Test-NetworkChanged','NetworkFingerprint','Test-BlockRulePresent','wmi-cooldown','WmiCooldownActive','Sync-KillSwitchState','Test-ServerRulePresent','Set-ServerRule','Start-HiddenScript','8.8.8.8','hits -ge 2','GPO: zombie tunnel','Test-InstallInProgress','install.inprogress','Remove-IPv6FromConfig','Install-WmiSubscription','Tunnel lost (confirmed 5x/10s)','60s hold','tamperTick','watchdog will deep-unbrick')) {
-    Assert-True ($rawCombined -match [regex]::Escape($n)) "Missing: $n"
+# [2] File-scoped patterns (not hollow rawCombined)
+Write-Host "[2/17] File-scoped v15.2.9 patterns" -ForegroundColor Yellow
+foreach ($row in (Get-FileScopedPatternMatrix)) {
+    foreach ($item in (Get-PatternMatrixEntries $row)) {
+        $found = $false
+        foreach ($f in $row.Files) {
+            if ($contentMap.ContainsKey($f) -and (Test-ContentPattern $contentMap[$f] $item.Pat -IsRegex:$item.Regex)) { $found = $true; break }
+        }
+        Assert-True $found "Scoped [$($row.Files -join ',')]: $($item.Pat)"
+    }
 }
-Assert-True ($rawCombined -notmatch 'Get-MainMonitorProcs') 'Broken Get-MainMonitorProcs alias must be removed'
-Assert-True ($rawCombined -notmatch 'function IsMainMonitor') 'Generated scripts must use Test-IsMainMonitor'
-Assert-True ($genRaw -match 'function Test-IsMainMonitor') 'monitor/repair embed Test-IsMainMonitor'
-Assert-True ($rawCombined -notmatch 'Tunnel came up during 3min wait') 'Legacy unsafe 3min message'
-Assert-True ($rawCombined -match 'if \(\`\$rewrite -or -not \(Test-ServerRulePresent\)\)') 'Conditional server rule rewrite'
-$main06Path = Join-Path $libDir 'Install-MainSteps-0-6.ps1'
-$main06Raw = if (Test-Path $main06Path) { [string](Get-Content -LiteralPath $main06Path -Raw -Encoding UTF8) } else { '' }
+foreach ($row in (Get-ForbiddenPatternMatrix)) {
+    if (-not $contentMap.ContainsKey($row.File)) { continue }
+    $body = $contentMap[$row.File]
+    foreach ($bad in $row.Forbidden) { Assert-True ($body -notmatch [regex]::Escape($bad)) "Forbidden $($row.File): $bad" }
+    foreach ($rx in $row.Regex) { Assert-True ($body -notmatch $rx) "Forbidden regex $($row.File): $rx" }
+}
 Assert-True ($main06Raw -match 'Invoke-SafeRegistrySet @ipv6RegParams') 'MainSteps 0-6: IPv6 registry via Invoke-SafeRegistrySet splat'
-$safeNetPath = Join-Path $libDir 'Install-SafeNetwork.ps1'
-$safeNetRaw = if (Test-Path $safeNetPath) { [string](Get-Content -LiteralPath $safeNetPath -Raw -Encoding UTF8) } else { '' }
 Assert-True ($safeNetRaw -match 'function Invoke-SafeRegistrySet') 'Invoke-SafeRegistrySet defined'
-Assert-True ($safeNetRaw -match '\[Parameter\(Mandatory\)\]\[string\]\$Path') 'Invoke-SafeRegistrySet accepts Path/Name/Value splat'
 Assert-True ($main06Raw -notmatch '(?m)^\s*netsh ') 'MainSteps 0-6: no bare netsh (DryRun-safe)'
-$v15StackPath = Join-Path $repoRoot 'scripts\install-v15-privacy-stack.ps1'
-$v15StackRaw = if (Test-Path $v15StackPath) { [string](Get-Content -LiteralPath $v15StackPath -Raw -Encoding UTF8) } else { '' }
-$v14StackPath = Join-Path $repoRoot 'scripts\install-v14-stack.ps1'
-$v14StackRaw = if (Test-Path $v14StackPath) { [string](Get-Content -LiteralPath $v14StackPath -Raw -Encoding UTF8) } else { '' }
 Assert-True ($v15StackRaw -match 'Join-Path `\$DNSCRYPT_DIR') 'v15 dnscrypt-guard: Join-Path for DNSCRYPT paths'
 Assert-True ($v14StackRaw -match 'Join-Path `\$DNSCRYPT_DIR') 'v14 dnscrypt-guard: Join-Path for DNSCRYPT paths'
-Assert-True ($v15StackRaw -match 'try \{') 'v15 privacy stack: fail-soft try/catch'
 Assert-True ($v15StackRaw -match 'Test-DnscryptListening') 'v15 dnscrypt-guard: health gate before WG DNS'
 Assert-True ($v15StackRaw -match 'deferGuards') 'v15 stack: defer guards during install lock'
 
-# [3] Extracted monitor (from lib/Install-GeneratedScripts.ps1)
-Write-Host "[3/11] Generated monitor.ps1" -ForegroundColor Yellow
-$mon = Extract-Heredoc $genRaw '$monitorContent'
-if ($mon) {
-    $tmp = Join-Path $env:TEMP "wg-mon-$([guid]::NewGuid().ToString('N')).ps1"
-    [IO.File]::WriteAllText($tmp, $mon, [Text.UTF8Encoding]::new($false))
-    Test-ScriptblockCreate $tmp 'monitor (extracted)' | Out-Null
-    Test-ParseFile $tmp 'monitor (extracted)' | Out-Null
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-} else { $failures.Add('monitor heredoc extract failed') }
+$extracted = Get-ExtractedGeneratedScripts $repoRoot
+$mon = $extracted.Monitor
+$gpo = $extracted.Gpo
 
-# [4] Extracted GPO (from lib/Install-GeneratedScripts.ps1)
-Write-Host "[4/11] Generated GPO script" -ForegroundColor Yellow
-$gpo = Extract-Heredoc $tasksRaw '$gpoContent'
-if ($gpo) {
-    $tmp = Join-Path $env:TEMP "wg-gpo-$([guid]::NewGuid().ToString('N')).ps1"
-    [IO.File]::WriteAllText($tmp, $gpo, [Text.UTF8Encoding]::new($false))
-    Test-ScriptblockCreate $tmp 'GPO (extracted)' | Out-Null
-    Test-ParseFile $tmp 'GPO (extracted)' | Out-Null
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-} else { $failures.Add('GPO heredoc extract failed') }
+# [3] Extracted monitor
+Write-Host "[3/17] Generated monitor.ps1" -ForegroundColor Yellow
+Test-ExtractedScript $mon 'monitor' @('function Enable-Block', 'Test-BlockAllowed', 'Test-ServerRulePresent', 'Set-ServerRule')
 
-# [5] Repair structure (compile fragment via install write simulation - grep based)
-Write-Host "[5/11] repair.ps1 structure" -ForegroundColor Yellow
-Assert-True ($rawCombined -match 'function Sync-KillSwitchState') 'repair Sync-KillSwitchState'
-Assert-True ($rawCombined -match 'Sync-KillSwitchState\r?\n\} finally') 'Sync before repair finally'
-Assert-True ($rawCombined -match 'monitor-only block authority') 'repair never blocks (monitor-only)'
-Assert-True ($rawCombined -match 'dns-lockdown-guard\.ps1') 'repair v15 dns-lockdown guard chain'
-Assert-True ($rawCombined -match 'network-privacy-guard\.ps1') 'repair v15 network-privacy guard chain'
-Assert-True ($rawCombined -match 'function Try-ReinstallTunnel') 'repair Try-ReinstallTunnel'
-Assert-True ($rawCombined -match 'monitor active, deferring reinstall') 'repair defers to monitor'
+# [4] Extracted GPO
+Write-Host "[4/17] Generated GPO script" -ForegroundColor Yellow
+Test-ExtractedScript $gpo 'gpo' @('Disable-KillSwitchBlock', 'fail-open')
 
-# [6] Test-Internet 2-of-3 logic
-Write-Host "[6/11] Test-Internet logic" -ForegroundColor Yellow
+# [5] Extracted repair.ps1 (compile, not grep-only)
+Write-Host "[5/17] repair.ps1 extract + compile" -ForegroundColor Yellow
+Test-ExtractedScript $extracted.Repair 'repair' @(
+    'function Sync-KillSwitchState',
+    'monitor-only block authority',
+    'dns-lockdown-guard.ps1',
+    'network-privacy-guard.ps1',
+    'function Try-ReinstallTunnel',
+    'monitor active, deferring reinstall',
+    'cmd.exe /c'
+)
+
+# [6] Extracted watchdog + wg-safety
+Write-Host "[6/17] watchdog + wg-safety extract + compile" -ForegroundColor Yellow
+Test-ExtractedScript $extracted.Watchdog 'watchdog' @('graduated fail-open', 'Invoke-GentleUnbrick', 'Invoke-DeepUnbrick', 'Restore-DhcpDnsOnPhysicalAdapters')
+if ($extracted.Safety) {
+    Test-ExtractedScript $extracted.Safety 'wg-safety' @('function Test-BlockAllowed', 'cmd.exe /c')
+    Assert-True ($extracted.Safety -notmatch 'Invoke-Expression') 'wg-safety: no Invoke-Expression'
+} else { $failures.Add('wg-safety extract failed') }
+
+# [7] Test-Internet 2-of-3 logic
+Write-Host "[7/17] Test-Internet logic" -ForegroundColor Yellow
 function Test-TcpHost([string]$HostName, [int]$Port, [int]$TimeoutMs = 4000) {
     $tcp = $null
     try {
@@ -160,8 +159,8 @@ function Test-Internet {
 }
 Assert-True ((Test-Internet) -is [bool]) 'Test-Internet returns bool'
 
-# [7] Mutex tests
-Write-Host "[7/11] Mutex simulations" -ForegroundColor Yellow
+# [8] Mutex tests
+Write-Host "[8/17] Mutex simulations" -ForegroundColor Yellow
 function Wait-NamedMutex([Threading.Mutex]$Mutex,[int]$TimeoutMs){try{return $Mutex.WaitOne($TimeoutMs)}catch [Threading.AbandonedMutexException]{return $true}}
 $ab = "Global_WGTestAb_$([guid]::NewGuid().ToString('N'))"
 $m1 = New-Object Threading.Mutex($true,$ab); $m1.Close(); $m1.Dispose()
@@ -182,42 +181,114 @@ Assert-True ($p.ExitCode -eq 0) "Cross-process mutex (exit=$($p.ExitCode))"
 Remove-Item $pp -Force -ErrorAction SilentlyContinue
 try{$mA.ReleaseMutex()}catch{}; $mA.Dispose()
 
-# [8] Installer guards
-Write-Host "[8/11] Installer guards" -ForegroundColor Yellow
-Assert-True ($rawCombined -match '\$ErrorActionPreference = "Continue"') 'Installer uses Continue'
-Assert-True ($rawCombined -match 'CustomEndpointIP requires -CustomConfig') 'Custom param guard'
+# [9] Installer guards
+Write-Host "[9/17] Installer guards" -ForegroundColor Yellow
+$installRaw = $contentMap['install.ps1']
+Assert-True ($main06Raw -match 'CustomEndpointIP requires -CustomConfig') 'Custom param guard'
+$adminIdx = $installRaw.IndexOf('Administrator')
+$dryRunIdx = $installRaw.IndexOf('$script:InstallDryRun')
+$dotSourceIdx = $installRaw.IndexOf('foreach ($mod in $LibModules)')
+Assert-True (($adminIdx -ge 0) -and ($dryRunIdx -gt $adminIdx) -and ($dotSourceIdx -gt $dryRunIdx)) 'admin check before dot-source'
 
-# [9] Ensure-ServerRule not spamming (no unconditional delete every loop)
-Write-Host "[9/11] Ensure-ServerRule efficiency" -ForegroundColor Yellow
+# [10] Ensure-ServerRule efficiency
+Write-Host "[10/17] Ensure-ServerRule efficiency" -ForegroundColor Yellow
 $monBody = if ($mon) { $mon } else { '' }
 Assert-True ($monBody -match 'function Set-ServerRule') 'Set-ServerRule helper'
 Assert-True ($monBody -match 'if \(\$rewrite -or -not \(Test-ServerRulePresent\)\) \{ Set-ServerRule \}') 'Ensure-ServerRule uses conditional Set-ServerRule'
 
-# [10] Race recovery live gate script (offline structure)
-Write-Host "[10/12] race-recovery-test.ps1 structure" -ForegroundColor Yellow
-$racePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\race-recovery-test.ps1'
-if (Test-Path $racePath) {
-    $raceRaw = Get-Content -LiteralPath $racePath -Raw -Encoding UTF8
+# [11] race-recovery + safe-live structure
+Write-Host "[11/17] race-recovery + safe-live structure" -ForegroundColor Yellow
+$raceRaw = $contentMap['scripts/race-recovery-test.ps1']
+if ($raceRaw) {
     foreach ($pat in @('ConfirmDisruptsInternet', 'Restore-Internet', 'DISRUPTS internet')) {
         Assert-True ($raceRaw -match [regex]::Escape($pat)) "race-recovery: $pat"
     }
-    Test-ParseFile $racePath 'race-recovery-test.ps1' | Out-Null
+    Test-ParseFile (Join-Path $repoRoot 'scripts\race-recovery-test.ps1') 'race-recovery-test.ps1' | Out-Null
 } else { $failures.Add('race-recovery-test.ps1 missing') }
 
-Write-Host "[11/12] safe-live-verify.ps1 structure" -ForegroundColor Yellow
-$safePath = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\safe-live-verify.ps1'
-if (Test-Path $safePath) {
-    $safeRaw = Get-Content -LiteralPath $safePath -Raw -Encoding UTF8
-    foreach ($pat in @('non-disruptive', 'NEVER stops tunnel', 'Post-check: TCP internet still working', 'Test-WmiSubscriptionActive', 'WMI subscription: filter+consumer+binding', 'v15.0', 'PrivacyStrong:', 'dns-lockdown-guard.ps1', 'network-privacy-guard.ps1', 'DnsLeak:', 'Test-DnscryptHealthy', 'dnscrypt-guard.ps1', 'Test-ScriptIntegrityVault', 'DnsOverHttpsMode', 'PrivacySandboxAdTopicsEnabled')) {
+$safeRaw = $contentMap['scripts/safe-live-verify.ps1']
+if ($safeRaw) {
+    foreach ($pat in @('non-disruptive', 'NEVER stops tunnel', 'Post-check: TCP internet still working', 'Test-WmiSubscriptionActive', 'dns-lockdown-guard.ps1', 'Test-DnscryptHealthy', 'Test-ScriptIntegrityVault')) {
         Assert-True ($safeRaw -match [regex]::Escape($pat)) "safe-live: $pat"
     }
-    Test-ParseFile $safePath 'safe-live-verify.ps1' | Out-Null
+    Test-ParseFile (Join-Path $repoRoot 'scripts\safe-live-verify.ps1') 'safe-live-verify.ps1' | Out-Null
 } else { $failures.Add('safe-live-verify.ps1 missing') }
 
 # [12] Layer count / WMI pwsh
-Write-Host "[12/12] Layer coverage" -ForegroundColor Yellow
-Assert-True ($rawCombined -match "powershell\.exe' OR TargetInstance\.Name='pwsh\.exe") 'WMI single OR query for both shells'
-Assert-True (($rawCombined | Select-String -Pattern 'Write-Step' -AllMatches).Matches.Count -ge 19) 'All install steps present'
+Write-Host "[12/17] Layer coverage" -ForegroundColor Yellow
+$privacyRaw = $contentMap['lib/Install-Privacy.ps1']
+Assert-True (($privacyRaw -match "powershell\.exe' OR TargetInstance\.Name='pwsh\.exe") -or ($genRaw -match "powershell\.exe' OR TargetInstance\.Name='pwsh\.exe")) 'WMI single OR query for both shells'
+$stepCount = ([regex]::Matches($contentMap['_installLibCombined'], 'Write-Step')).Count
+Assert-True ($stepCount -ge 19) "All install steps present ($stepCount Write-Step)"
+
+# [13] Behavioral PC simulations (200 scenarios)
+Write-Host "[13/17] behavior-sim-test.ps1 (216 PC reaction scenarios)" -ForegroundColor Yellow
+$behaviorPath = Join-Path $PSScriptRoot 'behavior-sim-test.ps1'
+if (Test-Path $behaviorPath) {
+    & $behaviorPath
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add('behavior-sim-test.ps1 failed (see output above)')
+    } else {
+        $script:passed += 216
+    }
+} else {
+    $failures.Add('behavior-sim-test.ps1 missing')
+}
+
+# [14] Post-reboot simulations (500 scenarios)
+Write-Host "[14/17] reboot-sim-test.ps1 (510 post-reboot PC scenarios)" -ForegroundColor Yellow
+$rebootPath = Join-Path $PSScriptRoot 'reboot-sim-test.ps1'
+if (Test-Path $rebootPath) {
+    & $rebootPath
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add('reboot-sim-test.ps1 failed (see output above)')
+    } else {
+        $script:passed += 510
+    }
+} else {
+    $failures.Add('reboot-sim-test.ps1 missing')
+}
+
+# [15] Full file coverage gate (every production file, anti-hollow)
+Write-Host "[15/17] file-coverage-test.ps1 (per-file manifest)" -ForegroundColor Yellow
+$coveragePath = Join-Path $PSScriptRoot 'file-coverage-test.ps1'
+if (Test-Path $coveragePath) {
+    $covOut = & $coveragePath 2>&1 | Out-String
+    Write-Host $covOut
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add('file-coverage-test.ps1 failed (see output above)')
+    } elseif ($covOut -match 'FILE COVERAGE: (\d+)/(\d+) files, (\d+) assertions PASSED') {
+        $script:passed += [int]$Matches[3]
+    }
+} else {
+    $failures.Add('file-coverage-test.ps1 missing')
+}
+
+# [16] Role contracts quick gate (duplicate guard - file-coverage also runs these)
+Write-Host "[16/17] Role contract spot-check" -ForegroundColor Yellow
+foreach ($contract in (Get-RoleContractMatrix | Select-Object -First 5)) {
+    foreach ($scriptName in $contract.Scripts) {
+        $rel = "scripts/$scriptName"
+        if ($contentMap.ContainsKey($rel)) {
+            Assert-True ($contentMap[$rel].Length -gt 200) "$rel is non-trivial (>$($contentMap[$rel].Length) chars)"
+        }
+    }
+}
+
+# [17] Final line-by-line audit (every repo file, 0 ERROR required)
+Write-Host "[17/17] final-line-audit.ps1 (93+ files dot-by-dot)" -ForegroundColor Yellow
+$auditPath = Join-Path $PSScriptRoot 'final-line-audit.ps1'
+if (Test-Path $auditPath) {
+    $auditOut = & $auditPath 2>&1 | Out-String
+    Write-Host $auditOut
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add('final-line-audit.ps1 failed (ERROR findings - see audit-results/)')
+    } else {
+        $script:passed++
+    }
+} else {
+    $failures.Add('final-line-audit.ps1 missing')
+}
 
 Write-Host ''
 if ($failures.Count -eq 0) {

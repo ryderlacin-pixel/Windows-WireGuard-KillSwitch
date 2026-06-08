@@ -69,7 +69,9 @@ function Invoke-SafeNetsh {
         Write-SafeActionLog "Would run: $Command$detail"
         return
     }
-    Invoke-Expression $Command | Out-Null
+    # FIXED: Use cmd.exe /c instead of Invoke-Expression to reduce injection surface
+    # (all Command strings in this project are internally generated and trusted)
+    cmd.exe /c $Command 2>$null | Out-Null
 }
 
 function Invoke-SafeRegistrySet {
@@ -325,7 +327,7 @@ function Add-KillSwitchFirewallExemptions {
         'netsh advfirewall firewall add rule name="KS-DHCP-Bcast-Out" dir=out action=allow protocol=UDP localport=68 remoteip=255.255.255.255 remoteport=67 enable=yes'
         'netsh advfirewall firewall add rule name="KS-DHCP-Server-In" dir=in action=allow protocol=UDP remoteport=67 localport=68 enable=yes'
     )
-    foreach (`$cmd in `$dhcpRules) { Invoke-Expression `$cmd | Out-Null }
+    foreach (`$cmd in `$dhcpRules) { cmd.exe /c `$cmd 2>`$null | Out-Null }
     `$gwList = Get-LocalGatewaySubnets
     if (`$gwList.Count -gt 0) {
         `$gwCsv = (`$gwList -join ',')

@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# Fast full-stack restore — tunnel + tasks + NSSM + v15 guards (no Get-ScheduledTask; no WMI network)
+# Fast full-stack restore - tunnel + tasks + NSSM + v15 guards (no Get-ScheduledTask; no WMI network)
 $ErrorActionPreference = 'Continue'
 $REG = 'HKLM:\SOFTWARE\WGKillSwitch'
 $INSTALL = 'C:\WireGuard'

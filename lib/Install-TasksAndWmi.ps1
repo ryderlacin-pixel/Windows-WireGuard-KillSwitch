@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 - Install-TasksAndWmi.ps1 (v15.1)
+# Dot-sourced from install.ps1 - Install-TasksAndWmi.ps1 (v15.2.9 modular split - REVIEWED)
 #Requires -Version 5.1
 
 function Invoke-InstallTasksAndWmi {

@@ -1,4 +1,4 @@
-# v15 strong privacy stack — dot-sourced from install.ps1 (requires admin + install.ps1 variables)
+# v15 strong privacy stack - dot-sourced from install.ps1 (requires admin + install.ps1 variables)
 #Requires -Version 5.1
 
 function Get-DnscryptTomlContentV15 {

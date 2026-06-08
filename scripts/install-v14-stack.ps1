@@ -1,4 +1,4 @@
-# v14 privacy stack — dot-sourced from install.ps1 (requires admin + install.ps1 variables)
+# v14 privacy stack - dot-sourced from install.ps1 (requires admin + install.ps1 variables)
 #Requires -Version 5.1
 
 function Get-TorBrowserRoots {

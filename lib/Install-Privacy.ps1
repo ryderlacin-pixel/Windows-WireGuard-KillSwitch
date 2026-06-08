@@ -1,4 +1,7 @@
-# Dot-sourced from install.ps1 - Install-Privacy.ps1 (v15.1 modular split)
+# Dot-sourced from install.ps1 - Install-Privacy.ps1 (v15.2.9 modular split - FIXED)
+# NOTE: Get-EndpointFromConfig / Get-ServerPort / Get-ServerIPs are network-related
+# and ideally belong in Install-Helpers.ps1 or Install-SafeNetwork.ps1.
+# They are left here for minimal diff / dot-source order compatibility.
 #Requires -Version 5.1
 function Get-ChromiumPrivacyDWordProps {
     return @{

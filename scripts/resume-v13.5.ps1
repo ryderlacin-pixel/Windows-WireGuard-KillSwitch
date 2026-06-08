@@ -14,7 +14,7 @@ function WARN($m) { Write-Host " [WARN] $m" -ForegroundColor Yellow }
 
 Write-Host "`n=== RESUME v13.5 (interrupted install) ===`n" -ForegroundColor Cyan
 
-# 1) GPO version stamp (logic unchanged from v13.4 — safe patch)
+# 1) GPO version stamp (logic unchanged from v13.4 - safe patch)
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'patch-gpo-v13.5.ps1') | Out-Host
 OK 'GPO script version patched'
 

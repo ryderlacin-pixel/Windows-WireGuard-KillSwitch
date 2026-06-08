@@ -56,11 +56,11 @@ try {
 
 # 1b. Repo description (About box on GitHub)
 Write-Host "[1b/6] Setting repo description..." -ForegroundColor Yellow
-$repoDescription = "Windows WireGuard kill switch + free WARP + v15.1 strong privacy (DNS lock, dnscrypt). One install.ps1, lib/ modules, 9 recovery layers."
+$repoDescription = "Windows WireGuard kill switch + free WARP + v15.2.9 strong privacy (DNS lock, dnscrypt). One install.ps1, lib/ modules, 9 recovery layers."
 try {
     Invoke-GH PATCH "https://api.github.com/repos/$Owner/$Repo" @{
         description = $repoDescription
-        homepage    = "https://github.com/$Owner/$Repo/releases/tag/v15.1"
+        homepage    = "https://github.com/$Owner/$Repo/releases/tag/v15.2.9"
     }
     Write-Host "  OK: description updated" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
@@ -73,10 +73,10 @@ try {
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 
 # 3. GitHub Releases (reviewer-focused notes)
-Write-Host "[3/6] Publishing releases (v15.1)..." -ForegroundColor Yellow
+Write-Host "[3/6] Publishing releases (v15.2.9)..." -ForegroundColor Yellow
 $publishScript = Join-Path $PSScriptRoot "publish-releases.ps1"
 if (Test-Path $publishScript) {
-    & $publishScript -Token $Token -Owner $Owner -Repo $Repo -Only v15.1
+    & $publishScript -Token $Token -Owner $Owner -Repo $Repo -Only v15.2.9
 } else {
     Write-Host "  FAIL: publish-releases.ps1 not found" -ForegroundColor Red
 }
@@ -85,7 +85,7 @@ if (Test-Path $publishScript) {
 Write-Host "[4/6] Updating profile bio..." -ForegroundColor Yellow
 try {
     Invoke-GH PATCH "https://api.github.com/user" @{
-        bio = "Windows WireGuard + WARP kill switch v15.1 - lib modules, DNS lock, 9 recovery layers"
+        bio = "Windows WireGuard + WARP kill switch v15.2.9 - lib modules, DNS lock, 9 recovery layers"
     }
     Write-Host "  OK" -ForegroundColor Green
 } catch { Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
@@ -97,7 +97,7 @@ Write-Host ""
 Write-Host "[6/6] Docs synced on main (README, PROMOTION, CODE_REVIEW, lib/)" -ForegroundColor Yellow
 Write-Host "  Push latest main before Reddit posts."
 Write-Host ""
-Write-Host "Next: Reddit posts -> docs/PROMOTION.md (v15.1)"
+Write-Host "Next: Reddit posts -> docs/PROMOTION.md (v15.2.9)"
 Write-Host "      Full checklist -> docs/LAUNCH_CHECKLIST.md"
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green

@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 - Install-UpgradePaths.ps1 (v15.1)
+# Dot-sourced from install.ps1 - Install-UpgradePaths.ps1 (v15.2.9 - FIXED heredoc)
 #Requires -Version 5.1
 
 function Invoke-InstallUpgradeEarlyExit {
@@ -7,12 +7,12 @@ if ($PrivacyUpgradeOnly) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
     Write-PrivacyHardeningGuardPs1
     OK "privacy-hardening-guard.ps1 written"
-    $webrtcForwarder = @'
-# WebRTC forwarder (v'@ + $WG_KS_VERSION + @')
-$ErrorActionPreference = 'SilentlyContinue'
-$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
-if (Test-Path $main) { & $main }
-'@
+    $webrtcForwarder = @"
+# WebRTC forwarder (v$WG_KS_VERSION)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path `$main) { & `$main }
+"@
     $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
     attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
     OK "webrtc-leak-guard.ps1 forwarder written"
@@ -102,12 +102,12 @@ if ($FullPrivacyUpgrade) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
     Write-PrivacyHardeningGuardPs1
     OK "privacy-hardening-guard.ps1 written"
-    $webrtcForwarder = @'
-# WebRTC forwarder (v'@ + $WG_KS_VERSION + @')
-$ErrorActionPreference = 'SilentlyContinue'
-$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
-if (Test-Path $main) { & $main }
-'@
+    $webrtcForwarder = @"
+# WebRTC forwarder (v$WG_KS_VERSION)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path `$main) { & `$main }
+"@
     $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
     attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
     Install-PrivacyHardening
@@ -146,12 +146,12 @@ if ($StrongPrivacyUpgrade) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
     Write-PrivacyHardeningGuardPs1
     OK "privacy-hardening-guard.ps1 written"
-    $webrtcForwarder = @'
-# WebRTC forwarder (v'@ + $WG_KS_VERSION + @')
-$ErrorActionPreference = 'SilentlyContinue'
-$main = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
-if (Test-Path $main) { & $main }
-'@
+    $webrtcForwarder = @"
+# WebRTC forwarder (v$WG_KS_VERSION)
+`$ErrorActionPreference = 'SilentlyContinue'
+`$main = Join-Path (Split-Path `$MyInvocation.MyCommand.Path -Parent) 'privacy-hardening-guard.ps1'
+if (Test-Path `$main) { & `$main }
+"@
     $webrtcForwarder | Set-Content $WEBRTC_GUARD_PS1 -Encoding UTF8 -Force
     attrib +S +H $WEBRTC_GUARD_PS1 2>$null | Out-Null
     Install-PrivacyHardening

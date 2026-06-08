@@ -7,23 +7,23 @@
 ![Release](https://img.shields.io/github/v/release/ryderlacin-pixel/Windows-WireGuard-KillSwitch)
 ![Stars](https://img.shields.io/github/stars/ryderlacin-pixel/Windows-WireGuard-KillSwitch?style=social)
 
-> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Boot-safe (v15.2.4). Strong privacy (v15).**
+> **One command (`.\install.ps1`). Modular code (`lib/`). Full kill switch. Boot-safe (v15.2.9). Strong privacy (v15).**
 
 Automatically installs WireGuard on Windows with a hardened kill switch and **v15 strong privacy** (system DNS lock, encrypted DNS, browser/telemetry hardening). **Default (recommended):** free anonymous Cloudflare WARP — no signup, no monthly fee. **Optional:** paid WireGuard VPN via `-CustomConfig` if you have a provider. **Sensitive browsing:** desktop **Hassas-Tarama** (Tor, one-step in v15.1+).
 
-**v15.2** is the current production release (boot-safety patch — see [post-mortem](docs/releases/v15.2.md)).
+**v15.2.9** is the current production release (final line audit 0 ERROR/WARN + 1008+ offline test gate — see [release notes](docs/releases/v15.2.9.md)).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.2.4](docs/releases/v15.2.4.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v15.2.9](docs/releases/v15.2.9.md)**. Implementation modules: **`lib/`** (dot-sourced from `install.ps1`).
 
 **Internet stuck?** Run **`emergency-reset.bat`** as Administrator (repo root or `C:\WireGuard\`) — removes `KS-*` rules, resets firewall/IP stack, re-enables physical adapters. Then wait 1–5 minutes for `WG-InternetWatchdog`, or re-run `install.ps1`.
 
 **First install on a real PC?** Test in a **VM** first: `.\install.ps1 -DryRun` (no firewall/NIC/registry-lock changes), then full VM install + reboot before physical hardware.
 
-**CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse `install.ps1` + `lib/*.ps1` + scripts, **164+ offline assertions** (×3 in `run-all-tests.ps1`), mutex tests (no WireGuard/admin required).
+**CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse `install.ps1` + `lib/*.ps1` + scripts, **1008+ offline assertions** (x3 in `run-all-tests.ps1`), per-file coverage + final line audit 0 ERROR/WARN (no WireGuard/admin required).
 
 **Security check (after install):** run `scripts\security-audit.ps1` as Administrator — IP leak, DNS leak, IPv6, kill switch simulation.
 
@@ -370,7 +370,12 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 
 ## Changelog
 
-### v15.2.4 (production — current)
+### v15.2.9 (production — current)
+- **Final line audit** — every repo file dot-by-dot; `scripts/final-line-audit.ps1` gate (0 ERROR, 0 WARN)
+- **1008+ offline assertions** — behavior-sim (216) + reboot-sim (510) + file-coverage (682) + suite gates
+- See **[docs/releases/v15.2.9.md](docs/releases/v15.2.9.md)**
+
+### v15.2.4
 - **Install internet protection** — DNS/guards deferred during install lock; WG DNS only after dnscrypt listens on `127.0.0.1:53`
 - See **[docs/releases/v15.2.4.md](docs/releases/v15.2.4.md)**
 

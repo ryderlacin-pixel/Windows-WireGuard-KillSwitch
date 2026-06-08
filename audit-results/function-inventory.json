@@ -1,0 +1,377 @@
+﻿{
+    "scripts/race-recovery-test.ps1":  [
+                                           "Assert",
+                                           "Test-TunnelRunning",
+                                           "Test-Tcp443",
+                                           "Test-Internet",
+                                           "Test-SafeToOpen",
+                                           "Get-MonitorCount",
+                                           "Get-LogLinesSince",
+                                           "Restore-Internet"
+                                       ],
+    "scripts/restore-full-stack.ps1":  [
+                                           "OK",
+                                           "WARN",
+                                           "ERR",
+                                           "Restore-TaskFromReg",
+                                           "Install-Tunnel",
+                                           "Install-NssmService",
+                                           "Start-Hidden"
+                                       ],
+    "scripts/github-visibility.ps1":  "Invoke-GH",
+    "scripts/resume-v13.5.ps1":  [
+                                     "OK",
+                                     "WARN"
+                                 ],
+    "scripts/ultimate-stress-test.ps1":  [
+                                             "Assert",
+                                             "Test-TunnelRunning",
+                                             "Test-Tcp443",
+                                             "Test-SafeToOpen",
+                                             "Get-MonitorCount",
+                                             "Invoke-Repair",
+                                             "Wait-Healthy",
+                                             "Wait-Monitor",
+                                             "Wait-Block",
+                                             "Test-AnyBlockRule"
+                                         ],
+    "lib/Install-MainSteps-0-6.ps1":  "Invoke-InstallMainSteps0to6",
+    "scripts/install-tor-browser.ps1":  [
+                                            "OK",
+                                            "WARN"
+                                        ],
+    "scripts/push-v15.2.ps1":  {
+
+                               },
+    "scripts/emergency-reset.ps1":  "Write-Log",
+    "scripts/publish-releases.ps1":  [
+                                         "Get-GitHubToken",
+                                         "ConvertTo-JsonUtf8",
+                                         "Invoke-GH",
+                                         "Get-ReleaseBody",
+                                         "Publish-Release"
+                                     ],
+    "scripts/system-audit.ps1":  {
+
+                                 },
+    "scripts/test-suite.ps1":  [
+                                   "Get-ChildPowerShellExe",
+                                   "Assert-True",
+                                   "Test-ParseFile",
+                                   "Test-ScriptblockCreate",
+                                   "Test-ExtractedScript",
+                                   "Test-TcpHost",
+                                   "Test-Internet",
+                                   "Wait-NamedMutex"
+                               ],
+    "scripts/tor-rollback-v13.5.ps1":  [
+                                           "OK",
+                                           "WARN"
+                                       ],
+    "scripts/final-line-audit.ps1":  [
+                                         "Get-RuleStringList",
+                                         "Add-Finding",
+                                         "Test-CurrentDocClaims",
+                                         "Test-Ps1FileDeep",
+                                         "Test-BatFile",
+                                         "Test-JsonFile",
+                                         "Test-YmlFile"
+                                     ],
+    "scripts/parse-check.ps1":  {
+
+                                },
+    "scripts/tor-audit.ps1":  [
+                                  "Assert",
+                                  "Get-TorRoots",
+                                  "Test-Socks9150"
+                              ],
+    "scripts/behavior-sim-test.ps1":  [
+                                          "Assert-Behavior",
+                                          "Get-SimBlockAllowed",
+                                          "Get-SimSafeToOpen",
+                                          "Get-SimMonitorStartupAction",
+                                          "Get-SimMonitorLoopAction",
+                                          "Get-SimRepairSyncAction",
+                                          "Get-SimInstallStep6Action",
+                                          "Get-SimDnsLockAction",
+                                          "Get-SimPrivacyGuardAction",
+                                          "Get-SimWatchdogAction",
+                                          "Get-SimEmergencyResetAction"
+                                      ],
+    "scripts/security-audit.ps1":  [
+                                       "Add-Result",
+                                       "Test-TcpHost",
+                                       "Test-RulePresent",
+                                       "Test-RuleEnabled",
+                                       "Test-RuleAbsent",
+                                       "Test-TunnelRunning"
+                                   ],
+    "lib/Install-MainSteps-18-20.ps1":  "Invoke-InstallMainSteps18to20",
+    "scripts/ci.ps1":  "Write-Step",
+    "scripts/safe-live-verify.ps1":  [
+                                         "Assert",
+                                         "Test-TunnelServiceRunning",
+                                         "Test-TunnelAdapterUp",
+                                         "Test-TunnelRunning",
+                                         "Test-Tcp443",
+                                         "Test-Internet",
+                                         "Test-SafeToOpen",
+                                         "Test-TaskExists",
+                                         "Test-WmiSubscriptionActive",
+                                         "Test-PrivacyChromiumPolicy",
+                                         "Test-ScriptIntegrityVault",
+                                         "Test-DnscryptHealthy",
+                                         "Get-MonitorCount"
+                                     ],
+    "lib/Install-TasksAndWmi.ps1":  "Invoke-InstallTasksAndWmi",
+    "scripts/post-reboot-verify.ps1":  [
+                                           "Log",
+                                           "Get-TunnelSvcName",
+                                           "Get-ScriptsDir",
+                                           "Test-TunnelRunning",
+                                           "Test-TcpHost",
+                                           "Test-Internet",
+                                           "Test-SafeToOpen"
+                                       ],
+    "scripts/live-smoke-test.ps1":  [
+                                        "Test-IsAdmin",
+                                        "Test-ProductionStackPresent"
+                                    ],
+    "install.ps1":  {
+
+                    },
+    "scripts/install-v14-stack.ps1":  [
+                                          "Get-TorBrowserRoots",
+                                          "Get-DnscryptManifest",
+                                          "Get-DnscryptTomlContent",
+                                          "Install-DnscryptProxy",
+                                          "Install-DnscryptService",
+                                          "Unlock-WireGuardConfigForWrite",
+                                          "Set-WireGuardDnsLocalhost",
+                                          "Test-DnscryptHealthy",
+                                          "Write-DnscryptGuardPs1",
+                                          "Get-TorUserJsContent",
+                                          "Write-TorHardeningGuardPs1",
+                                          "Write-TorConnectivityMonitorPs1",
+                                          "Write-LeakSentinelPs1",
+                                          "Write-AllV14GuardScripts",
+                                          "Install-TorBrowserHint",
+                                          "Patch-RepairV14GuardChain",
+                                          "Invoke-V14DnsLeakStack",
+                                          "Invoke-V14TorStack",
+                                          "Invoke-V14FullPrivacyStack",
+                                          "Test-V14DnsLeakHealthy",
+                                          "Test-V14TorPresent",
+                                          "Extend-ScriptIntegrityVaultV14",
+                                          "Test-ScriptIntegrityVaultV14"
+                                      ],
+    "scripts/open-launch-links.ps1":  {
+
+                                      },
+    "scripts/reboot-sim-test.ps1":  [
+                                        "Assert-Reboot",
+                                        "Test-SimBlockAllowed",
+                                        "Get-SimDnsBroken",
+                                        "Get-SimMonitorBootUx",
+                                        "Get-SimGpoBootUx",
+                                        "Get-SimWatchdogAction",
+                                        "Get-SimServiceStartupAction",
+                                        "Get-SimMonitorLoopUx",
+                                        "Get-SimPostRebootVerifyUx",
+                                        "Get-SimDnsTimelineUx",
+                                        "Get-SimRecoveryLayer"
+                                    ],
+    "scripts/post-install-verify.ps1":  [
+                                            "Assert",
+                                            "Test-RuleEnabled",
+                                            "Test-RuleAbsent",
+                                            "Test-TcpHost",
+                                            "Test-Internet",
+                                            "Test-TunnelRunning",
+                                            "Test-TaskActive"
+                                        ],
+    "scripts/run-all-tests.ps1":  {
+
+                                  },
+    "scripts/install-v15-privacy-stack.ps1":  [
+                                                  "Get-DnscryptTomlContentV15",
+                                                  "Get-TorUserJsContentV15",
+                                                  "Install-DnscryptExeFirewallRule",
+                                                  "Write-DnsLockdownGuardPs1",
+                                                  "Write-NetworkPrivacyGuardPs1",
+                                                  "Write-DnscryptGuardPs1V15",
+                                                  "Write-TorHardeningGuardPs1V15",
+                                                  "Write-LeakSentinelPs1V15",
+                                                  "Install-V15WifiRandomMac",
+                                                  "Install-SensitiveModeLauncher",
+                                                  "Patch-RepairV15GuardChain",
+                                                  "Invoke-V15StrongPrivacyStack",
+                                                  "Test-V15DnsLockdownHealthy",
+                                                  "Test-V15NetworkPrivacyHealthy",
+                                                  "Extend-ScriptIntegrityVaultV15",
+                                                  "Test-ScriptIntegrityVaultV15"
+                                              ],
+    "scripts/leak-audit.ps1":  [
+                                   "Assert",
+                                   "Test-DnscryptRunning",
+                                   "Test-LocalDns53",
+                                   "Test-DirectDnsLeak"
+                               ],
+    "scripts/file-coverage-test.ps1":  [
+                                           "Assert-Coverage",
+                                           "Test-FileParseAndScriptblock"
+                                       ],
+    "lib/Install-GeneratedScripts.ps1":  "Invoke-InstallGeneratedScripts",
+    "lib/Install-Helpers.ps1":  [
+                                    "Write-Step",
+                                    "OK",
+                                    "WARN",
+                                    "Write-Err",
+                                    "Write-Info",
+                                    "Wait-NamedMutex",
+                                    "Test-TcpHost",
+                                    "Test-Internet",
+                                    "Get-PreferredShell",
+                                    "Start-HiddenScript",
+                                    "Test-FirewallRuleEnabled",
+                                    "Test-SafeToOpen",
+                                    "Log",
+                                    "Get-ShortCimSession",
+                                    "Get-WmiBindFilter",
+                                    "Test-WmiSubscriptionActive",
+                                    "Invoke-Schtasks",
+                                    "Invoke-ScCommand",
+                                    "Remove-TaskFully",
+                                    "Register-RepairTaskDualTrigger",
+                                    "Refresh-RegistryTaskBackups",
+                                    "Register-TaskViaSchtasks",
+                                    "Export-TaskXmlSafe",
+                                    "Test-TunnelServiceRunning",
+                                    "Test-TunnelAdapterUp",
+                                    "Test-TunnelRunning",
+                                    "Test-IsMainMonitor",
+                                    "Get-MonitorShellProcs",
+                                    "Set-InstallLock",
+                                    "Clear-InstallLock",
+                                    "Test-InstallInProgress",
+                                    "Test-DnscryptListening",
+                                    "Restore-DhcpDnsOnPhysicalAdapters",
+                                    "Test-InstallHealthStable",
+                                    "Invoke-DeferredPrivacyGuards",
+                                    "Invoke-GuardScriptSafe",
+                                    "Ensure-DnscryptTomlFile",
+                                    "Remove-InstallBlocks",
+                                    "Backup-TunnelConfig",
+                                    "Restore-TunnelConfigIfMissing",
+                                    "Restart-TunnelWithConfig",
+                                    "Ensure-TunnelForInstall",
+                                    "Unlock-InstallDirForWrite",
+                                    "Remove-IPv6FromConfig"
+                                ],
+    "scripts/patch-gpo-v13.5.ps1":  {
+
+                                    },
+    "scripts/resume-v14.ps1":  [
+                                   "OK",
+                                   "WARN"
+                               ],
+    "scripts/fetch-nssm.ps1":  {
+
+                               },
+    "lib/Install-SafeNetwork.ps1":  [
+                                        "Get-OsUptimeSeconds",
+                                        "Test-BootSafeWindow",
+                                        "Test-IsVirtualTunnelAdapter",
+                                        "Assert-AdapterMutationAllowed",
+                                        "Write-SafeActionLog",
+                                        "Invoke-SafeNetsh",
+                                        "Invoke-SafeRegistrySet",
+                                        "Get-LocalGatewaySubnets",
+                                        "Add-KillSwitchFirewallExemptions",
+                                        "Add-KillSwitchCatchAllBlocks",
+                                        "Disable-TunnelIPv6BindingsOnly",
+                                        "Disable-AllIPv6Bindings",
+                                        "Enable-AllPhysicalAdapters",
+                                        "Invoke-FailOpenSafeguard",
+                                        "Set-BootGraceRegistry",
+                                        "Set-PostInstallGraceRegistry",
+                                        "Get-WgSafetyRuntimeScript",
+                                        "Invoke-DeployWgSafetyModule"
+                                    ],
+    "lib/Install-UpgradePaths.ps1":  "Invoke-InstallUpgradeEarlyExit",
+    "scripts/ensure-tor-sensitive.ps1":  "Find-TorBrowserExe",
+    "scripts/scriptblock-test.ps1":  {
+
+                                     },
+    "lib/Install-Privacy.ps1":  [
+                                    "Get-ChromiumPrivacyDWordProps",
+                                    "Get-FirefoxPrivacyPolicyJson",
+                                    "Get-WindowsPrivacyRegBlocks",
+                                    "Set-ChromiumPrivacyPolicies",
+                                    "Install-BrowserPrivacyPolicies",
+                                    "Install-WindowsTelemetryReduction",
+                                    "Install-PrivacyHardening",
+                                    "Write-PrivacyHardeningGuardPs1",
+                                    "Get-ScriptSha256",
+                                    "Install-ScriptIntegrityVault",
+                                    "Test-PrivacyChromiumPolicy",
+                                    "Test-WindowsTelemetryReduced",
+                                    "Test-ScriptIntegrityVault",
+                                    "Stop-AllMonitorProcs",
+                                    "Ensure-DelayedAutoStart",
+                                    "Test-DelayedAutoStart",
+                                    "Install-WmiSubscription",
+                                    "Remove-KurtarArtifacts",
+                                    "Update-GpoScriptsIni",
+                                    "Unlock-GuardDirForWrite",
+                                    "Write-GuardBackups",
+                                    "Get-EndpointFromConfig",
+                                    "Get-ServerPort",
+                                    "Get-ServerIPs"
+                                ],
+    "scripts/sensitive-mode.ps1":  {
+
+                                   },
+    "scripts/tor-preflight.ps1":  {
+
+                                  },
+    "scripts/privacy-audit.ps1":  [
+                                      "Assert",
+                                      "Test-DnscryptHealthy",
+                                      "Test-SystemDnsLocked",
+                                      "Test-PrivacyChromiumPolicy"
+                                  ],
+    "scripts/repair-wmi-subscription.ps1":  [
+                                                "Get-WmiBindFilter",
+                                                "Test-WmiSubscriptionActive",
+                                                "Install-WmiSubscription"
+                                            ],
+    "scripts/pre-push-gate.ps1":  "Assert-Gate",
+    "lib/Install-Constants.ps1":  {
+
+                                  },
+    "scripts/Test-Helpers.ps1":  [
+                                     "Unescape-GeneratedScript",
+                                     "Extract-HeredocAtDoubleQuote",
+                                     "Extract-HeredocAtSingleQuote",
+                                     "Get-SimulatedRepairContent",
+                                     "Get-ExtractedGeneratedScripts",
+                                     "Test-ParseContent",
+                                     "Test-ScriptblockContent",
+                                     "Write-ExtractedToTemp",
+                                     "Get-CiScriptSkipList",
+                                     "Get-ProductionFileManifest",
+                                     "Get-FileContentMap",
+                                     "Get-PatternMatrixEntries",
+                                     "Test-ContentPattern",
+                                     "Get-ForbiddenPatternMatrix",
+                                     "Get-FileScopedPatternMatrix",
+                                     "Get-RoleContractMatrix",
+                                     "Get-MonitorSimParityKeywords",
+                                     "Get-FileAuditTier",
+                                     "Get-CompleteRepoManifest",
+                                     "Get-Ps1FunctionNames",
+                                     "Get-LineSemanticRules",
+                                     "Test-IsCommentLine"
+                                 ]
+}

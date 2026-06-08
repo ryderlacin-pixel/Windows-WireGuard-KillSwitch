@@ -141,7 +141,7 @@ if ($wifiBlock) {
     else { Add-Result 'DNS Leak' 'KS-DNS-Block off when healthy' 'WARN' 'DNS block still enabled while internet open' }
 }
 
-# Test DNS to non-CF server should fail (3 attempts — ignore single flaky response)
+# Test DNS to non-CF server should fail (3 attempts - ignore single flaky response)
 $dnsLeakHits = 0
 for ($attempt = 1; $attempt -le 3; $attempt++) {
     try {
@@ -234,7 +234,7 @@ foreach ($r in @('KS-WARP-Server-Out','KS-WireGuard-EXE','KS-LAN-Out','KS-DHCP-O
     else { Add-Result 'Firewall' "$r enabled" 'FAIL' 'Missing' }
 }
 
-# --- SIMULATED LEAK TEST (tunnel stop brief) — OPT-IN ONLY ---
+# --- SIMULATED LEAK TEST (tunnel stop brief) - OPT-IN ONLY ---
 Write-Host ''
 if (-not $ConfirmDisruptiveTests) {
     Add-Result 'Kill Switch SIM' 'Tunnel stop test' 'PASS' 'Skipped (use -ConfirmDisruptiveTests to run)'
@@ -286,7 +286,7 @@ if (-not (Test-TunnelRunning)) {
 Start-Process powershell -ArgumentList '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\WireGuard\repair.ps1' -WindowStyle Hidden -EA SilentlyContinue
 schtasks /Run /TN '\WG-KillSwitch' 2>$null | Out-Null
 
-# --- PROCESS LAYERS (after sim — wait for monitor recovery) ---
+# --- PROCESS LAYERS (after sim - wait for monitor recovery) ---
 $monProcs = @()
 for ($mw = 0; $mw -lt 12; $mw++) {
     $monProcs = @()

@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v14 preflight — port 53 + dnscrypt readiness (read-only).
+# v14 preflight - port 53 + dnscrypt readiness (read-only).
 $ErrorActionPreference = 'Continue'
 
 Write-Host "`n=== V14 PREFLIGHT ===`n" -ForegroundColor Cyan

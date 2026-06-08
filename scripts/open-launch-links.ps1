@@ -3,7 +3,7 @@ $links = @(
     "https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch",
     "https://github.com/settings/tokens/new",
     "https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/settings",
-    "https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.1",
+    "https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v15.2.9",
     "https://github.com/ryderlacin-pixel?tab=repositories",
     "https://github.com/settings/profile",
     "https://www.reddit.com/r/PowerShell/comments/1tza2u0/refactored_a_monolithic_script_into_a_modular/",

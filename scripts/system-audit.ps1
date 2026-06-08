@@ -8,7 +8,8 @@ if ($reg) {
     Write-Host 'Registry: WGKillSwitch not found'
 }
 
-foreach ($p in @('C:\WireGuard', 'C:\Users\seyit\Windows-WireGuard-KillSwitch')) {
+$repoRoot = Split-Path $PSScriptRoot -Parent
+foreach ($p in @('C:\WireGuard', $repoRoot)) {
     if (Test-Path $p) {
         Write-Host "`nDIR: $p" -ForegroundColor Yellow
         Get-ChildItem $p -EA SilentlyContinue | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize

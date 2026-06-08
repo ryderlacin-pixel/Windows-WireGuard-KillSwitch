@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v14 DNS leak audit — read-only probes, never changes firewall.
+# v14 DNS leak audit - read-only probes, never changes firewall.
 $ErrorActionPreference = 'Continue'
 $REG = 'HKLM:\SOFTWARE\WGKillSwitch'
 $pass = 0

@@ -33,14 +33,14 @@ Non-English issues or PRs may be closed without review.
 - **Implementation:** `lib/*.ps1` (dot-sourced modules) + `scripts/install-v14-stack.ps1`, `scripts/install-v15-privacy-stack.ps1`
 - **Runtime output:** generated scripts under `C:\WireGuard\` on the target machine
 
-When changing install behavior, update the relevant `lib/` module (or stack script), keep `install.ps1` thin, and run `.\scripts\test-suite.ps1` (164+ assertions).
+When changing install behavior, update the relevant `lib/` module (or stack script), keep `install.ps1` thin, and run `.\scripts\test-suite.ps1` (1008+ assertions, 0 ERROR/WARN on final line audit).
 
 ## Code review
 
 Before opening a design or security question, read **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. It documents:
 
 - Reviewer Q&A (v10.2 → v10.4) and v11–v15 history
-- **`lib/` module map** (v15.1)
+- **`lib/` module map** (v15.2.9)
 - Why WMI and 9 recovery layers exist
 - Firewall model and verification commands (`live-smoke-test.ps1`, `safe-live-verify.ps1`)
 

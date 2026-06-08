@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v15.1 sensitive browsing — one-step Tor install + harden + launch
+# v15.1 sensitive browsing - one-step Tor install + harden + launch
 $ErrorActionPreference = 'Continue'
 
 Write-Host ''

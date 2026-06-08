@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v15.0 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v15.0 SAFE LIVE VERIFY - read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0

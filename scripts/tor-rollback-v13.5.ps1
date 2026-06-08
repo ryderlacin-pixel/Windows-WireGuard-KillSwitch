@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Continue'
 function OK($m) { Write-Host " [OK]   $m" -ForegroundColor Green }
 function WARN($m) { Write-Host " [WARN] $m" -ForegroundColor Yellow }
 
-Write-Host "`n=== ROLLBACK v14 → v13.5 privacy baseline ===`n" -ForegroundColor Cyan
+Write-Host "`n=== ROLLBACK v14 -> v13.5 privacy baseline ===`n" -ForegroundColor Cyan
 Write-Host " Kill switch, monitor, repair are NOT removed.`n" -ForegroundColor Gray
 
 & sc.exe stop WG-DnscryptProxy 2>$null | Out-Null

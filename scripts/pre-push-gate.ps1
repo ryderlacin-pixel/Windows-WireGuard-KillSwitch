@@ -32,7 +32,7 @@ $install   = Get-Content (Join-Path $repoRoot 'install.ps1') -Raw -Encoding UTF8
 if ($constants -match "\`$WG_KS_VERSION = '([^']+)'") { $ver = $Matches[1] } else { $ver = '' }
 Assert-Gate ($ver -eq '15.2.9') "WG_KS_VERSION = 15.2.9 (got '$ver')"
 Assert-Gate ($install -match 'v15\.2\.9') 'install.ps1 header version'
-Assert-Gate ($constants -notmatch 'Ã¢â‚¬') 'Install-Constants.ps1: no mojibake'
+Assert-Gate (-not ($constants -match '[^\x09\x0A\x0D\x20-\x7E]')) 'Install-Constants.ps1: ASCII-only (no mojibake)'
 
 # 3) Critical code-review invariants (static)
 Write-Host "`n>> Critical invariants" -ForegroundColor Yellow
@@ -64,7 +64,19 @@ Assert-Gate ($main1820 -match 'Set-PostInstallGraceRegistry') 'STEP 19 post-inst
 Assert-Gate ($gen -match 'Test-PostInstallGrace') 'monitor respects post-install grace'
 Assert-Gate ($emerBat -match '^@echo off') 'emergency-reset.bat is real batch file'
 
-# 4) Release notes exist for current version
+# 4) File coverage gate (every production file, anti-hollow)
+Write-Host "`n>> File coverage (anti-hollow)" -ForegroundColor Yellow
+& (Join-Path $PSScriptRoot 'file-coverage-test.ps1')
+if ($LASTEXITCODE -ne 0) { $failures.Add('file-coverage-test.ps1 failed') }
+else { Write-Host '  [OK]   file-coverage-test.ps1' -ForegroundColor Green }
+
+# 5) Final line audit (every repo file, 0 ERROR)
+Write-Host "`n>> Final line audit (dot-by-dot)" -ForegroundColor Yellow
+& (Join-Path $PSScriptRoot 'final-line-audit.ps1')
+if ($LASTEXITCODE -ne 0) { $failures.Add('final-line-audit.ps1 failed (see audit-results/)') }
+else { Write-Host '  [OK]   final-line-audit.ps1 (0 ERROR)' -ForegroundColor Green }
+
+# 6) Release notes exist for current version
 Write-Host "`n>> Release artifact" -ForegroundColor Yellow
 Assert-Gate (Test-Path (Join-Path $repoRoot 'docs\releases\v15.2.9.md')) 'docs/releases/v15.2.9.md exists'
 

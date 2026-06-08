@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 - Install-GeneratedScripts.ps1 (v15.1)
+# Dot-sourced from install.ps1 - Install-GeneratedScripts.ps1 (v15.2.9 modular split - REVIEWED)
 #Requires -Version 5.1
 
 function Invoke-InstallGeneratedScripts {
@@ -718,14 +718,14 @@ function Repair-EssentialFirewall {
         $need = (-not (Test-FwRuleExists $e.N)) -or (-not (Test-FwRuleEnabled $e.N)) -or ((Get-FwRuleCount $e.N) -gt 1)
         if ($need) {
             netsh advfirewall firewall delete rule name=$e.N 2>$null | Out-Null
-            Invoke-Expression $e.A | Out-Null
+            cmd.exe /c $e.A 2>$null | Out-Null
             Log "Firewall restored: $($e.N)"
         }
     }
     foreach ($e in $existsOnly) {
         if (-not (Test-FwRuleExists $e.N) -or ((Get-FwRuleCount $e.N) -gt 1)) {
             netsh advfirewall firewall delete rule name=$e.N 2>$null | Out-Null
-            Invoke-Expression $e.A | Out-Null
+            cmd.exe /c $e.A 2>$null | Out-Null
             Log "Firewall ensured: $($e.N)"
         }
     }

@@ -97,14 +97,14 @@ for ($passNum = 1; $passNum -le $PassCount; $passNum++) {
     Assert (Test-SafeToOpen) "Baseline: SafeToOpen healthy"
     Assert ((Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue).Version -ge '11.0') "Baseline: registry version 11.0+"
 
-    # [2] Kill monitor — should respawn
+    # [2] Kill monitor - should respawn
     Write-Host '[stress] Kill monitor process...' -ForegroundColor Gray
     Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object { $_.CommandLine -match 'monitor\.ps1' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue }
     Assert (Wait-Monitor 45) "Recovery: monitor respawned after kill"
     if (-not $Quick) { Assert (Wait-Healthy 90) "Recovery: healthy after monitor kill" }
 
-    # [3] Stop tunnel — block must engage
+    # [3] Stop tunnel - block must engage
     Write-Host '[stress] Stop tunnel service...' -ForegroundColor Gray
     sc.exe stop $TUNNEL_SVC 2>$null | Out-Null
     $blockOk = $false
@@ -126,7 +126,7 @@ for ($passNum = 1; $passNum -le $PassCount; $passNum++) {
 
     # [3b] Race test is OPT-IN ONLY (run race-recovery-test.ps1 -ConfirmDisruptsInternet manually)
 
-    # [4] Firewall tamper — delete block rule
+    # [4] Firewall tamper - delete block rule
     Write-Host '[stress] Delete KS-Block-WiFi-Out...' -ForegroundColor Gray
     netsh advfirewall firewall delete rule name=KS-Block-WiFi-Out 2>$null | Out-Null
     sc.exe stop $TUNNEL_SVC 2>$null | Out-Null
@@ -156,7 +156,7 @@ for ($passNum = 1; $passNum -le $PassCount; $passNum++) {
     $dns = netsh advfirewall firewall show rule name=KS-DNS-Block 2>&1 | Out-String
     Assert ($dns -match 'Enabled:\s+Yes') "Tamper: KS-DNS-Block restored by repair"
 
-    # [6] Modem/network simulation — DHCP renew + DNS flush
+    # [6] Modem/network simulation - DHCP renew + DNS flush
     if (-not $Quick) {
         Write-Host '[stress] Network/modem simulation (DHCP renew)...' -ForegroundColor Gray
         ipconfig /flushdns 2>$null | Out-Null
@@ -176,7 +176,7 @@ for ($passNum = 1; $passNum -le $PassCount; $passNum++) {
         Assert (Wait-Healthy 90) "Network: recovered after Wi-Fi bounce"
     }
 
-    # [8] Config IPv6 injection — repair should fix on next install/repair
+    # [8] Config IPv6 injection - repair should fix on next install/repair
     if (-not $Quick) {
         Write-Host '[stress] Inject ::/0 into config then repair...' -ForegroundColor Gray
         icacls C:\WireGuard /grant "BUILTIN\Administrators:(OI)(CI)F" /T /C /Q 2>$null | Out-Null

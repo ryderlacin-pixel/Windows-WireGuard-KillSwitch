@@ -1,4 +1,4 @@
-# Dot-sourced from install.ps1 - Install-MainSteps-0-6.ps1 (v15.1)
+# Dot-sourced from install.ps1 - Install-MainSteps-0-6.ps1 (v15.2.9 - no catch-all during install)
 #Requires -Version 5.1
 
 function Invoke-InstallMainSteps0to6 {
@@ -239,7 +239,7 @@ foreach ($k in $allRules) {
 }
 
 Invoke-SafeNetsh 'netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound' 'reset firewall policy'
-# Keep tunnel alive during upgrade — reinstall only in STEP 5 if down
+# Keep tunnel alive during upgrade - reinstall only in STEP 5 if down
 if (Test-Path $INSTALL_DIR) {
     foreach ($legacy in @('repair.lock', 'onarim.lock', 'onarim.ps1', 'servis-monitor.ps1', 'wmi-onarim.ps1')) {
         Remove-Item (Join-Path $INSTALL_DIR $legacy) -Force -EA SilentlyContinue
@@ -298,14 +298,14 @@ if (Test-Path $DNSCRYPT_EXE) {
     Invoke-SafeNetsh $dnscryptRule 'dnscrypt EXE'
 }
 Write-Info "Server IPs: $serverIPs"
-if (-not $script:InstallDryRun) {
-    Add-KillSwitchCatchAllBlocks
-} else {
-    Write-SafeActionLog 'Would add catch-all KS-Block-* rules (deferred until tunnel healthy)'
-}
-OK "Firewall rules applied"
+# FIXED: Do NOT add catch-all kill-switch blocks during install.
+# This was causing potential transient internet loss / race with monitor.
+# Only exemptions + allow rules are added here. Catch-all blocks are ONLY
+# activated later by monitor.ps1 AFTER install lock is cleared and health confirmed.
+# The previous "Add then immediately Remove" dance is removed.
+OK "Firewall rules applied (exemptions + allows only - no catch-all blocks yet)"
 
-# Install lock: never leave outbound blocks on during install (agent/remote needs internet)
+# Install lock: explicitly ensure no outbound blocks are active during install
 Remove-InstallBlocks
 if (Test-SafeToOpen) {
     OK "Tunnel + internet verified - blocks deferred until install completes"
