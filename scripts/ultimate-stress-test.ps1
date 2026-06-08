@@ -1,11 +1,18 @@
 #Requires -RunAsAdministrator
-# WireGuard Kill Switch - ULTIMATE LIVE STRESS TEST (v11.4 gate)
+# WireGuard Kill Switch - ULTIMATE LIVE STRESS TEST (v12.0 - OPT-IN DESTRUCTIVE)
 # Simulates: process kill, tunnel drop, firewall tamper, network/modem change, reinstall, layer recovery
+# For daily use run safe-live-verify.ps1 instead (non-disruptive).
 param(
     [int]$PassCount = 1,
-    [switch]$Quick
+    [switch]$Quick,
+    [switch]$ConfirmDisruptsInternet
 )
 $ErrorActionPreference = 'Continue'
+if (-not $ConfirmDisruptsInternet) {
+    Write-Host 'ABORT: Destructive stress test. Use safe-live-verify.ps1 for production checks.' -ForegroundColor Red
+    Write-Host '       To run this test: -ConfirmDisruptsInternet' -ForegroundColor Yellow
+    exit 2
+}
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -79,7 +86,7 @@ function Wait-Block([int]$sec = 30) {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  ULTIMATE STRESS TEST (v11.4)" -ForegroundColor Cyan
+Write-Host "  ULTIMATE STRESS TEST (v12.0 - destructive)" -ForegroundColor Cyan
 Write-Host "  Passes: $PassCount  Quick: $Quick" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 

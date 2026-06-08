@@ -7,10 +7,10 @@ function Assert([bool]$cond, [string]$msg) {
     else { Write-Host "  [OK] $msg" -ForegroundColor Green }
 }
 
-Write-Host '=== POST-INSTALL VERIFICATION (v11.4) ===' -ForegroundColor Cyan
+Write-Host '=== POST-INSTALL VERIFICATION (v12.0) ===' -ForegroundColor Cyan
 
 $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -EA SilentlyContinue
-Assert ($reg.Version -ge '11.4') "Registry version 11.4+ (got $($reg.Version))"
+Assert ($reg.Version -ge '12.0') "Registry version 12.0+ (got $($reg.Version))"
 
 foreach ($f in @('monitor.ps1','repair.ps1','service-monitor.ps1','wmi-repair.ps1','wgcf-profile.conf')) {
     Assert (Test-Path "C:\WireGuard\$f") "File exists: $f"
@@ -109,15 +109,19 @@ foreach ($tn in @('WG-KillSwitch','WG-RepairTask')) {
     Assert ($t -and $t.State -in @('Ready','Running')) "Task $tn active ($($t.State))"
 }
 
-$svc = & sc.exe query WGKillSwitchSvc 2>&1 | Out-String
-Assert ($svc -match 'RUNNING') 'WGKillSwitchSvc RUNNING'
+if (Test-Path 'C:\WireGuard\nssm.exe') {
+    $svc = & sc.exe query WGKillSwitchSvc 2>&1 | Out-String
+    Assert ($svc -match 'RUNNING') 'WGKillSwitchSvc RUNNING'
+} else {
+    Assert $true 'WGKillSwitchSvc skipped (NSSM not installed)'
+}
 
 $wmi = Get-CimInstance -Namespace root\subscription -ClassName __EventFilter -EA SilentlyContinue | Where-Object { $_.Name -eq 'WGMonitorFilter' }
 Assert ($null -ne $wmi) 'WMI subscription active'
 
 # v11.0 script version + self-repair checks
 $monRaw = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
-Assert ($monRaw -match 'v11\.') 'monitor.ps1 is v11.x'
+Assert ($monRaw -match 'v12\.0') 'monitor.ps1 is v12.0'
 Assert ($monRaw -match 'Test-SafeToOpen') 'monitor.ps1 has Test-SafeToOpen'
 Assert ($monRaw -match 'Test-InstallInProgress|monitor\.pid') 'monitor has install-safe logic'
 

@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# WG Kill Switch - Post-Reboot Auto Verification (v11.2)
+# WG Kill Switch - Post-Reboot Auto Verification (v12.0)
 param([switch]$Force)
 $ErrorActionPreference = 'Continue'
 $LOG = 'C:\WireGuard\reboot-verify.log'
@@ -9,18 +9,30 @@ function Log([string]$m) {
     Add-Content $LOG "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | $m" -Encoding UTF8 -EA SilentlyContinue
 }
 
+function Get-TunnelSvcName {
+    try {
+        $reg = Get-ItemProperty $REG -Name TunnelName -EA SilentlyContinue
+        if ($reg.TunnelName) { return "WireGuardTunnel`$$($reg.TunnelName)" }
+    } catch {}
+    return 'WireGuardTunnel$wgcf-profile'
+}
+
 function Get-ScriptsDir {
     try {
         $reg = Get-ItemProperty $REG -Name ScriptsPath -EA SilentlyContinue
         if ($reg.ScriptsPath -and (Test-Path $reg.ScriptsPath)) { return [string]$reg.ScriptsPath }
     } catch {}
-    $repo = 'C:\Users\seyit\Windows-WireGuard-KillSwitch\scripts'
-    if (Test-Path $repo) { return $repo }
+    $candidates = @(
+        'C:\Users\seyit\Windows-WireGuard-KillSwitch\scripts',
+        (Join-Path $env:ProgramData 'WGKillSwitchGuard\scripts')
+    )
+    foreach ($p in $candidates) { if (Test-Path $p) { return $p } }
     return $null
 }
 
 function Test-TunnelRunning {
-    return ([bool]((& sc.exe query 'WireGuardTunnel$wgcf-profile' 2>$null) -match 'RUNNING'))
+    $svc = Get-TunnelSvcName
+    return ([bool]((& sc.exe query $svc 2>$null) -match 'RUNNING'))
 }
 
 function Test-TcpHost([string]$HostName, [int]$Port = 443, [int]$TimeoutMs = 4000) {
@@ -35,8 +47,14 @@ function Test-TcpHost([string]$HostName, [int]$Port = 443, [int]$TimeoutMs = 400
     finally { if ($tcp) { try { $tcp.Close() } catch {} } }
 }
 
+function Test-Internet {
+    $hits = 0
+    foreach ($h in @('1.1.1.1', '1.0.0.1', '8.8.8.8')) { if (Test-TcpHost $h) { $hits++ } }
+    return ($hits -ge 2)
+}
+
 function Test-SafeToOpen {
-    return (Test-TunnelRunning) -and (Test-TcpHost '1.1.1.1') -and (Test-TcpHost '8.8.8.8')
+    return (Test-TunnelRunning) -and (Test-Internet)
 }
 
 $bootTime = try { (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime } catch { Get-Date }
@@ -63,7 +81,7 @@ if (-not $scriptsDir) {
 }
 
 $overall = 0
-foreach ($name in @('post-install-verify.ps1', 'security-audit.ps1')) {
+foreach ($name in @('safe-live-verify.ps1', 'security-audit.ps1')) {
     $path = Join-Path $scriptsDir $name
     if (-not (Test-Path $path)) {
         Log "FAIL: missing $path"

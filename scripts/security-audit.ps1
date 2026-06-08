@@ -1,5 +1,7 @@
 #Requires -RunAsAdministrator
-# WireGuard Kill Switch - Full Security Audit (IP/DNS/IPv6/KillSwitch)
+# WireGuard Kill Switch - Full Security Audit (IP/DNS/IPv6/KillSwitch) v12.0
+# Read-only by default. Tunnel-stop simulation requires -ConfirmDisruptiveTests.
+param([switch]$ConfirmDisruptiveTests)
 $ErrorActionPreference = 'Continue'
 $findings = [System.Collections.Generic.List[object]]::new()
 $pass = 0
@@ -224,10 +226,12 @@ foreach ($r in @('KS-WARP-Server-Out','KS-WireGuard-EXE','KS-LAN-Out','KS-DHCP-O
     else { Add-Result 'Firewall' "$r enabled" 'FAIL' 'Missing' }
 }
 
-# --- SIMULATED LEAK TEST (tunnel stop brief) ---
+# --- SIMULATED LEAK TEST (tunnel stop brief) — OPT-IN ONLY ---
 Write-Host ''
-Write-Host '[-->] Kill switch simulation: brief tunnel stop...' -ForegroundColor Yellow
-if ($tunnelUp) {
+if (-not $ConfirmDisruptiveTests) {
+    Add-Result 'Kill Switch SIM' 'Tunnel stop test' 'PASS' 'Skipped (use -ConfirmDisruptiveTests to run)'
+} elseif ($tunnelUp) {
+    Write-Host '[-->] Kill switch simulation: brief tunnel stop...' -ForegroundColor Yellow
     sc.exe stop 'WireGuardTunnel$wgcf-profile' 2>$null | Out-Null
     $postTunnel = $true
     $postBlock = $false

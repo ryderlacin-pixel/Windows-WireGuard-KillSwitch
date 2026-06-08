@@ -9,7 +9,7 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v11.3** is the current production release (anti-tamper guard, stress-tested, monitor singleton, post-reboot auto-verify).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v12.0** is the current production release (ultimate: WMI dual-shell, PID-validated singleton, mutex tunnel recovery, emergency unbrick, safe-live-verify gate).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
@@ -266,6 +266,15 @@ Get-Content C:\WireGuard\killswitch.log -Tail 20
 ---
 
 ## Changelog
+
+### v12.0 (ultimate)
+- **WMI fix:** single subscription watches both `powershell.exe` and `pwsh.exe` (OR query)
+- **PID hardening:** monitor/repair validate `monitor.pid` by command-line, not PID reuse
+- **Tunnel recovery:** shared mutex reinstall with `sc.exe start` + 30s poll; repair task 15min limit
+- **Emergency unbrick:** monitor removes blocks after prolonged failure (never brick indefinitely)
+- **GPO fix:** parameterized `$TUNNEL_SVC` (custom tunnel names work)
+- **safe-live-verify.ps1:** production gate — read-only, never stops tunnel
+- Destructive tests (`race-recovery`, `ultimate-stress`) require `-ConfirmDisruptsInternet`
 
 ### v11.3
 - **Anti-tamper guard:** `anti-tamper.ps1` + hidden vault `C:\ProgramData\WGKillSwitchGuard`
