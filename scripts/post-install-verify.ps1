@@ -151,8 +151,8 @@ Assert ($wmiRaw -match 'wmi-cooldown') 'wmi-repair.ps1 has WMI cooldown'
 $qc = & sc.exe qc 'WireGuardTunnel$wgcf-profile' 2>$null | Out-String
 Assert ($qc -match 'DELAYED') 'Tunnel service delayed-auto-start configured'
 
-Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat rescue script present'
-Assert (Test-Path 'C:\WireGuard\kurtar2.ps1') 'kurtar2.ps1 rescue script present'
+Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) 'kurtar.bat removed (v13.2+)'
+Assert (-not (Test-Path 'C:\WireGuard\kurtar2.ps1')) 'kurtar2.ps1 removed (v13.2+)'
 Assert (-not (Test-Path 'C:\WireGuard\install.inprogress')) 'install lock cleared after install'
 
 $cfg = Get-Content 'C:\WireGuard\wgcf-profile.conf' -Raw -EA SilentlyContinue

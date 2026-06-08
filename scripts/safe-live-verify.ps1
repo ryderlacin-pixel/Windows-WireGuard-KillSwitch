@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# v13.1 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
+# v13.2 SAFE LIVE VERIFY — read-only production gate. NEVER stops tunnel or disrupts internet.
 $ErrorActionPreference = 'Continue'
 $failures = [System.Collections.Generic.List[string]]::new()
 $pass = 0
@@ -74,7 +74,7 @@ function Get-MonitorCount {
 }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  SAFE LIVE VERIFY (v13.1 - non-disruptive)" -ForegroundColor Cyan
+Write-Host "  SAFE LIVE VERIFY (v13.2 - non-disruptive)" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
 $healthy = Test-SafeToOpen
@@ -84,11 +84,13 @@ if (-not $healthy) {
 }
 
 $ksReg = Get-ItemProperty $REG -EA SilentlyContinue
-Assert ($ksReg -and $ksReg.Version -ge '13.1') "Registry version 13.1+ (got $($ksReg.Version))"
+Assert ($ksReg -and $ksReg.Version -ge '13.2') "Registry version 13.2+ (got $($ksReg.Version))"
 Assert (Test-Path 'C:\WireGuard\monitor.ps1') 'monitor.ps1 deployed'
 Assert (Test-Path 'C:\WireGuard\repair.ps1') 'repair.ps1 deployed'
-Assert (Test-Path 'C:\WireGuard\kurtar.bat') 'kurtar.bat deployed'
-Assert (Test-Path 'C:\WireGuard\kurtar2.ps1') 'kurtar2.ps1 deployed'
+Assert (-not (Test-Path 'C:\WireGuard\kurtar.bat')) 'kurtar.bat removed'
+Assert (-not (Test-Path 'C:\WireGuard\kurtar.ps1')) 'kurtar.ps1 removed'
+Assert (-not (Test-Path 'C:\WireGuard\kurtar2.ps1')) 'kurtar2.ps1 removed'
+Assert (-not (Test-Path 'C:\WireGuard\resume-after-unbrick.ps1')) 'resume-after-unbrick.ps1 removed'
 Assert (Test-Path 'C:\WireGuard\anti-tamper.ps1') 'anti-tamper.ps1 deployed'
 
 $mon = Get-Content 'C:\WireGuard\monitor.ps1' -Raw -EA SilentlyContinue
@@ -96,11 +98,9 @@ $rep = Get-Content 'C:\WireGuard\repair.ps1' -Raw -EA SilentlyContinue
 $svc = Get-Content 'C:\WireGuard\service-monitor.ps1' -Raw -EA SilentlyContinue
 $wmi = Get-Content 'C:\WireGuard\wmi-repair.ps1' -Raw -EA SilentlyContinue
 $gpo = Get-Content 'C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup\wg-startup.ps1' -Raw -EA SilentlyContinue
-$k2 = Get-Content 'C:\WireGuard\kurtar2.ps1' -Raw -EA SilentlyContinue
 $wd = Get-Content 'C:\WireGuard\internet-watchdog.ps1' -Raw -EA SilentlyContinue
-$res = Get-Content 'C:\WireGuard\resume-after-unbrick.ps1' -Raw -EA SilentlyContinue
 
-Assert ($mon -match 'v13\.1') 'monitor.ps1 version v13.1'
+Assert ($mon -match 'v13\.2') 'monitor.ps1 version v13.2'
 Assert ($mon -match 'Test-TunnelAdapterUp') 'monitor dual-check: service + adapter'
 Assert ($mon -match 'Test-BootGrace') 'monitor has BootGrace fail-open'
 Assert ($mon -match 'Test-BlockAllowed') 'monitor has block-allowed guard'
@@ -110,21 +110,20 @@ Assert ($mon -match 'no re-block') 'monitor recovery never re-blocks'
 Assert ($mon -match 'zombieStreak') 'monitor debounces zombie block (15x)'
 Assert ($mon -match 'tunnelLostStreak') 'monitor debounces tunnel-down (5x)'
 Assert ($mon -match 'Invoke-EmergencyUnbrick') 'monitor has emergency unbrick'
-Assert ($rep -match 'v13\.1|Repair Script v13') 'repair.ps1 version v13.1'
+Assert ($mon -match 'protection stays installed') 'monitor emergency unbrick keeps protection'
+Assert ($mon -notmatch 'kurtar') 'monitor has no kurtar references'
+Assert ($rep -match 'v13\.2|Repair Script v13') 'repair.ps1 version v13.2'
 Assert ($rep -match 'monitor-only block authority') 'repair never blocks (monitor-only)'
 Assert ($rep -notmatch 'function Enable-Block') 'repair has no Enable-Block function'
 Assert ($rep -match 'Test-BootGrace') 'repair respects BootGrace'
 Assert ($rep -match 'Test-TunnelAdapterUp') 'repair dual-check: service + adapter'
-Assert ($k2 -match 'UnbrickUntil') 'kurtar2 sets UnbrickUntil cooldown'
-Assert ($k2 -match 'Disable-ScheduledTask') 'kurtar2 disables tasks'
-Assert ($k2 -match 'FromAuto') 'kurtar2 supports auto mode'
 Assert ($wd -match 'Invoke-GentleUnbrick') 'watchdog has gentle unbrick'
+Assert ($wd -match 'Invoke-DeepUnbrick') 'watchdog has deep unbrick (no teardown)'
 Assert ($wd -match 'streak') 'watchdog graduated response'
+Assert ($wd -notmatch 'kurtar') 'watchdog has no kurtar references'
 Assert ($wd -match 'Test-TunnelAdapterUp') 'watchdog dual-check tunnel'
-Assert (Test-Path 'C:\WireGuard\resume-after-unbrick.ps1') 'resume-after-unbrick.ps1 deployed'
-Assert ($res -match 'BootGraceUntil') 'resume sets BootGrace after unbrick'
 Assert ($svc -match 'Test-HoldActive') 'service-monitor respects BootGrace/Unbrick'
-Assert ($gpo -match 'v13\.1') 'GPO script version v13.1'
+Assert ($gpo -match 'v13\.2') 'GPO script version v13.2'
 Assert ($gpo -match 'Test-BootGrace') 'GPO respects BootGrace'
 Assert ($gpo -match 'never blocks') 'GPO has no block authority'
 

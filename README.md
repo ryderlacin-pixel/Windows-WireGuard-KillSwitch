@@ -9,15 +9,15 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.1** is the current production release (monitor-only block authority, startup fail-open, tunnel service+adapter dual-check, safe-live-verify gate).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.2** is the current production release (no destructive rescue scripts — watchdog/monitor gentle unbrick only, protection always stays installed).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.1](docs/releases/v13.1.md)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.2](docs/releases/v13.2.md)**.
 
-**Emergency (internet dead):** double-click `C:\WireGuard\kurtar.bat` or run `C:\WireGuard\kurtar2.ps1` as Administrator.
+**Internet stuck?** Wait 1–5 minutes — `WG-InternetWatchdog` auto-unbricks every minute without disabling protection. If still stuck, re-run `install.ps1` as Administrator.
 
 **CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse, compile, 52 assertions × 3, mutex tests (no WireGuard/admin required).
 
@@ -49,7 +49,7 @@ flowchart TB
 
 1. **Downloads & installs WireGuard** silently (if not already installed)
 2. **Downloads wgcf** and generates an **anonymous** Cloudflare WARP account — no email, no login
-3. **Applies a kill switch** via Windows Firewall — **v13.1 fail-open**: only monitor blocks; repair/GPO never cut internet; debounced tunnel-down/zombie detection
+3. **Applies a kill switch** via Windows Firewall — **v13.2 fail-open**: only monitor blocks; no destructive rescue scripts; watchdog gentle/deep unbrick keeps all layers running
 4. **Installs 9 redundant recovery layers** so the VPN restarts automatically after crashes or reboots (including post-reboot audit)
 
 No personal data is stored anywhere. The WARP registration is completely anonymous.
