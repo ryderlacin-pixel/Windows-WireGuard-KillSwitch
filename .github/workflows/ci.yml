@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Environment diagnostics
-        shell: pwsh
+        shell: powershell
         run: |
           Write-Host "PowerShell: $($PSVersionTable.PSVersion) on $($PSVersionTable.OS)"
           foreach ($cmd in @('pwsh', 'powershell.exe')) {
@@ -43,7 +43,7 @@ jobs:
           }
 
       - name: Offline CI (parse, compile, patterns, mutex)
-        shell: pwsh
+        shell: powershell
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
