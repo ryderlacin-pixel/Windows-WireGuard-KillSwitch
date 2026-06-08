@@ -127,6 +127,10 @@ function Unlock-WireGuardConfigForWrite {
 
 function Set-WireGuardDnsLocalhost {
     if (-not (Test-Path $script:CONFIG)) { return $false }
+    if (-not (Test-DnscryptHealthy)) {
+        if (Get-Command WARN -EA SilentlyContinue) { WARN 'WireGuard DNS unchanged - dnscrypt not healthy yet' }
+        return $false
+    }
     Unlock-WireGuardConfigForWrite
     try {
         $lines = [System.Collections.Generic.List[string]]::new()
@@ -179,6 +183,17 @@ if (`$st -notmatch 'RUNNING') {
         & 'C:\WireGuard\nssm.exe' start `$DNSCRYPT_SVC 2>`$null | Out-Null
     } else { & sc.exe start `$DNSCRYPT_SVC 2>`$null | Out-Null }
     Start-Sleep 2
+}
+function Test-DnscryptListening {
+    `$st2 = & sc.exe query `$DNSCRYPT_SVC 2>&1 | Out-String
+    if (`$st2 -notmatch 'RUNNING') { return `$false }
+    `$net = & netstat.exe -ano 2>&1 | Out-String
+    return (`$net -match '127\.0\.0\.1:53\s+.*LISTENING')
+}
+if (-not (Test-DnscryptListening)) {
+    Log 'SKIP: dnscrypt not listening on 127.0.0.1:53 - refusing WG DNS change'
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'DnscryptState' 'DEFERRED' -Force -EA SilentlyContinue
+    exit 0
 }
 if (Test-Path `$CONFIG) {
     `$lines = Get-Content `$CONFIG -Encoding UTF8
@@ -361,11 +376,16 @@ function Invoke-V14DnsLeakStack {
         Write-AllV14GuardScripts
         if (Install-DnscryptProxy) {
             Install-DnscryptService | Out-Null
-            Set-WireGuardDnsLocalhost | Out-Null
-            if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
-                Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
-            } elseif (Test-Path $script:DNSCRYPT_GUARD_PS1) {
-                & $script:DNSCRYPT_GUARD_PS1 2>$null
+            $deferGuards = (Get-Command Test-InstallInProgress -EA SilentlyContinue) -and (Test-InstallInProgress)
+            if (-not $deferGuards) {
+                Set-WireGuardDnsLocalhost | Out-Null
+                if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+                    Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
+                } elseif (Test-Path $script:DNSCRYPT_GUARD_PS1) {
+                    & $script:DNSCRYPT_GUARD_PS1 2>$null
+                }
+            } elseif (Get-Command WARN -EA SilentlyContinue) {
+                WARN 'dnscrypt DNS/guard deferred until install completes (internet protected)'
             }
         }
         Patch-RepairV14GuardChain | Out-Null

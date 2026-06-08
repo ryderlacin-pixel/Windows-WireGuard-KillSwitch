@@ -211,6 +211,42 @@ function Clear-InstallLock {
     Remove-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'InstallInProgress' -EA SilentlyContinue
 }
 
+function Test-InstallInProgress {
+    if (Test-Path 'C:\WireGuard\install.inprogress') { return $true }
+    try {
+        $reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name InstallInProgress -ErrorAction SilentlyContinue
+        return ($reg.InstallInProgress -eq 1)
+    } catch { return $false }
+}
+
+function Test-DnscryptListening {
+    $exe = if ($script:DNSCRYPT_EXE) { $script:DNSCRYPT_EXE } elseif ($DNSCRYPT_EXE) { $DNSCRYPT_EXE } else { 'C:\WireGuard\dnscrypt-proxy\dnscrypt-proxy.exe' }
+    if (-not (Test-Path $exe)) { return $false }
+    $svc = if ($script:DNSCRYPT_SVC) { $script:DNSCRYPT_SVC } elseif ($DNSCRYPT_SVC) { $DNSCRYPT_SVC } else { 'WG-DnscryptProxy' }
+    $st = & sc.exe query $svc 2>&1 | Out-String
+    if ($st -notmatch 'RUNNING') { return $false }
+    $net = & netstat.exe -ano 2>&1 | Out-String
+    return ($net -match '127\.0\.0\.1:53\s+.*LISTENING')
+}
+
+function Invoke-DeferredPrivacyGuards {
+    if (Test-InstallInProgress) {
+        WARN 'Privacy guards deferred: install still in progress'
+        return
+    }
+    if (-not (Test-DnscryptListening)) {
+        WARN 'Privacy guards deferred: dnscrypt not listening on 127.0.0.1:53 (repair will retry)'
+        return
+    }
+    foreach ($g in @(
+        $(if ($script:DNSCRYPT_GUARD_PS1) { $script:DNSCRYPT_GUARD_PS1 } else { "$INSTALL_DIR\dnscrypt-guard.ps1" }),
+        $(if ($script:DNS_LOCKDOWN_GUARD_PS1) { $script:DNS_LOCKDOWN_GUARD_PS1 } else { "$INSTALL_DIR\dns-lockdown-guard.ps1" }),
+        $(if ($script:NETWORK_PRIVACY_GUARD_PS1) { $script:NETWORK_PRIVACY_GUARD_PS1 } else { "$INSTALL_DIR\network-privacy-guard.ps1" })
+    )) {
+        if ($g) { Invoke-GuardScriptSafe -Path $g -Label (Split-Path $g -Leaf) | Out-Null }
+    }
+}
+
 function Invoke-GuardScriptSafe {
     param(
         [Parameter(Mandatory)][string]$Path,

@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.3)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v15.2.4)
 # ================================================================
 # Orchestrator: implementation in lib/*.ps1 (dot-sourced below).
 # Entry point unchanged: .\install.ps1

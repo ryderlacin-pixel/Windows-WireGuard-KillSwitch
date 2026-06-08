@@ -146,6 +146,17 @@ if (`$st -notmatch 'RUNNING') {
     } else { & sc.exe start `$DNSCRYPT_SVC 2>`$null | Out-Null }
     Start-Sleep 2
 }
+function Test-DnscryptListening {
+    `$st2 = & sc.exe query `$DNSCRYPT_SVC 2>&1 | Out-String
+    if (`$st2 -notmatch 'RUNNING') { return `$false }
+    `$net = & netstat.exe -ano 2>&1 | Out-String
+    return (`$net -match '127\.0\.0\.1:53\s+.*LISTENING')
+}
+if (-not (Test-DnscryptListening)) {
+    Log 'SKIP: dnscrypt not listening on 127.0.0.1:53 - refusing WG DNS change'
+    Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'DnscryptState' 'DEFERRED' -Force -EA SilentlyContinue
+    exit 0
+}
 if (Test-Path `$CONFIG) {
     `$lines = Get-Content `$CONFIG -Encoding UTF8
     `$out = @(); `$has = `$false
@@ -334,24 +345,29 @@ function Invoke-V15StrongPrivacyStack {
         Install-DnscryptExeFirewallRule | Out-Null
         Install-V15WifiRandomMac | Out-Null
         Install-SensitiveModeLauncher | Out-Null
-        if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
-            Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
-            Start-Sleep -Seconds 2
-            foreach ($g in @(
-                $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
-                $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
-            )) {
-                Invoke-GuardScriptSafe -Path $g -Label (Split-Path $g -Leaf)
+        $deferGuards = (Get-Command Test-InstallInProgress -EA SilentlyContinue) -and (Test-InstallInProgress)
+        if (-not $deferGuards) {
+            if (Get-Command Invoke-GuardScriptSafe -EA SilentlyContinue) {
+                Invoke-GuardScriptSafe -Path $script:DNSCRYPT_GUARD_PS1 -Label 'dnscrypt-guard'
+                Start-Sleep -Seconds 2
+                foreach ($g in @(
+                    $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
+                    $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
+                )) {
+                    Invoke-GuardScriptSafe -Path $g -Label (Split-Path $g -Leaf)
+                }
+            } else {
+                if (Test-Path $script:DNSCRYPT_GUARD_PS1) { & $script:DNSCRYPT_GUARD_PS1 2>$null }
+                Start-Sleep -Seconds 2
+                foreach ($g in @(
+                    $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
+                    $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
+                )) {
+                    if (Test-Path $g) { & $g 2>$null }
+                }
             }
-        } else {
-            if (Test-Path $script:DNSCRYPT_GUARD_PS1) { & $script:DNSCRYPT_GUARD_PS1 2>$null }
-            Start-Sleep -Seconds 2
-            foreach ($g in @(
-                $script:DNS_LOCKDOWN_GUARD_PS1, $script:NETWORK_PRIVACY_GUARD_PS1,
-                $script:TOR_GUARD_PS1, $script:LEAK_SENTINEL_PS1
-            )) {
-                if (Test-Path $g) { & $g 2>$null }
-            }
+        } elseif (Get-Command WARN -EA SilentlyContinue) {
+            WARN 'v15 privacy guards deferred until install completes (internet protected)'
         }
         Patch-RepairV15GuardChain | Out-Null
         Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'V15StrongPrivacy' '1' -Force -EA SilentlyContinue

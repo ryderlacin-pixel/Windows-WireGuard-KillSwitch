@@ -124,6 +124,9 @@ OK "Guard vault refreshed (final script versions)"
 # ================================================================
 Write-Step "STEP 20 - FINAL CHECK"
 # ================================================================
+if (Get-Command Invoke-DeferredPrivacyGuards -EA SilentlyContinue) {
+    Invoke-DeferredPrivacyGuards
+}
 $warnings = 0
 if (Test-TunnelRunning) { OK "Tunnel: RUNNING" } else { WARN "Tunnel: DOWN (monitor will recover)"; $warnings++ }
 if (Test-SafeToOpen) {
