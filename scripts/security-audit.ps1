@@ -126,12 +126,20 @@ Write-Host '[-->] DNS leak tests...' -ForegroundColor Gray
 $dnsBlockUdp = Test-RuleEnabled 'KS-DNS-Block'
 $dnsBlockTcp = Test-RuleEnabled 'KS-DNS-Block-TCP'
 $dnsAllow = Test-RuleEnabled 'KS-DNS-Allow'
-if ($dnsBlockUdp) { Add-Result 'DNS Leak' 'KS-DNS-Block (UDP/53)' 'PASS' 'Blocks unauthorized UDP DNS' }
-else { Add-Result 'DNS Leak' 'KS-DNS-Block (UDP/53)' 'FAIL' 'Rule missing or disabled' }
-if ($dnsBlockTcp) { Add-Result 'DNS Leak' 'KS-DNS-Block-TCP' 'PASS' 'Blocks TCP port 53' }
-else { Add-Result 'DNS Leak' 'KS-DNS-Block-TCP' 'FAIL' 'Rule missing or disabled' }
-if ($dnsAllow) { Add-Result 'DNS Leak' 'KS-DNS-Allow (1.1.1.1/1.0.0.1)' 'PASS' 'Only CF DNS allowed outbound' }
+$wifiBlock = Test-RuleEnabled 'KS-Block-WiFi-Out'
+$dnsRulesExist = -not ((netsh advfirewall firewall show rule name='KS-DNS-Block' 2>$null | Out-String) -match 'No rules match')
+if ($dnsRulesExist) { Add-Result 'DNS Leak' 'KS-DNS rules present' 'PASS' 'DNS leak rules installed' }
+else { Add-Result 'DNS Leak' 'KS-DNS rules present' 'FAIL' 'DNS rules missing' }
+if ($dnsAllow) { Add-Result 'DNS Leak' 'KS-DNS-Allow (1.1.1.1/1.0.0.1)' 'PASS' 'CF DNS allow rule present' }
 else { Add-Result 'DNS Leak' 'KS-DNS-Allow' 'FAIL' 'Allow rule missing' }
+if ($wifiBlock) {
+    if ($dnsBlockUdp) { Add-Result 'DNS Leak' 'KS-DNS-Block active while blocked' 'PASS' 'UDP/53 blocked when kill switch active' }
+    else { Add-Result 'DNS Leak' 'KS-DNS-Block active while blocked' 'WARN' 'Outbound block on but DNS leak rules off' }
+    if ($dnsBlockTcp) { Add-Result 'DNS Leak' 'KS-DNS-Block-TCP active while blocked' 'PASS' 'TCP/53 blocked when kill switch active' }
+} else {
+    if (-not $dnsBlockUdp) { Add-Result 'DNS Leak' 'KS-DNS-Block off when healthy' 'PASS' 'v13 fail-open: DNS rules disabled when internet open' }
+    else { Add-Result 'DNS Leak' 'KS-DNS-Block off when healthy' 'WARN' 'DNS block still enabled while internet open' }
+}
 
 # Test DNS to non-CF server should fail (3 attempts — ignore single flaky response)
 $dnsLeakHits = 0

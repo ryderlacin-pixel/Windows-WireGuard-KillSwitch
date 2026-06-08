@@ -9,13 +9,15 @@
 
 > **One script. No config. No personal info. Full kill switch.**
 
-Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks all traffic if the VPN drops. **v12.0** is the current production release (ultimate: WMI dual-shell, PID-validated singleton, mutex tunnel recovery, emergency unbrick, safe-live-verify gate).
+Automatically installs WireGuard + Cloudflare WARP on Windows with a hardened kill switch that blocks traffic only after confirmed VPN failure. **v13.0** is the current production release (ultimate fail-open: BootGrace, debounced blocks, kurtar2 full unbrick, graduated watchdog, safe-live-verify gate).
 
 **Keywords:** Windows WireGuard kill switch · VPN leak protection · Cloudflare WARP auto setup · PowerShell firewall · custom WireGuard server · wgcf · anonymous VPN · censorship circumvention
 
 > **Language:** Documentation, issues, discussions, and support are **English only**. Please open issues and ask questions in English.
 
-**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v11.2](https://github.com/ryderlacin-pixel/Windows-WireGuard-KillSwitch/releases/tag/v11.2)**.
+**Reviewing the code?** See **[docs/CODE_REVIEW.md](docs/CODE_REVIEW.md)**. Latest release: **[v13.0](docs/releases/v13.0.md)**.
+
+**Emergency (internet dead):** double-click `C:\WireGuard\kurtar.bat` or run `C:\WireGuard\kurtar2.ps1` as Administrator.
 
 **CI (every push):** GitHub Actions runs `scripts\ci.ps1` on `windows-latest` — parse, compile, 52 assertions × 3, mutex tests (no WireGuard/admin required).
 
@@ -47,7 +49,7 @@ flowchart TB
 
 1. **Downloads & installs WireGuard** silently (if not already installed)
 2. **Downloads wgcf** and generates an **anonymous** Cloudflare WARP account — no email, no login
-3. **Applies a kill switch** via Windows Firewall that blocks all internet traffic unless the VPN tunnel is active
+3. **Applies a kill switch** via Windows Firewall — **v13.0 fail-open**: internet stays open during boot grace and brief tunnel flicker; blocks only after confirmed tunnel-down
 4. **Installs 9 redundant recovery layers** so the VPN restarts automatically after crashes or reboots (including post-reboot audit)
 
 No personal data is stored anywhere. The WARP registration is completely anonymous.

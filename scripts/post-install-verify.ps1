@@ -50,8 +50,16 @@ function Test-TunnelRunning {
 $safe = (Test-TunnelRunning) -and (Test-Internet)
 Assert $safe "Test-SafeToOpen (tunnel + internet)"
 
-foreach ($r in @('KS-WARP-Server-Out','KS-DNS-Block','KS-DNS-Block-TCP')) {
-    Assert (Test-RuleEnabled $r) "Firewall rule enabled: $r"
+Assert (Test-RuleEnabled 'KS-WARP-Server-Out') "Firewall rule enabled: KS-WARP-Server-Out"
+if ($safe) {
+    foreach ($r in @('KS-DNS-Block','KS-DNS-Block-TCP')) {
+        $o = netsh advfirewall firewall show rule name=$r 2>$null | Out-String
+        Assert ($o -match 'Enabled:\s+No') "DNS leak OFF when healthy: $r"
+    }
+} else {
+    foreach ($r in @('KS-DNS-Block','KS-DNS-Block-TCP')) {
+        Assert (Test-RuleEnabled $r) "DNS leak ON when blocked: $r"
+    }
 }
 if ($safe) {
     foreach ($r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {

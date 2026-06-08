@@ -1,5 +1,5 @@
 # ================================================================
-# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v12.3)
+# WireGuard + WARP Kill Switch - FULL AUTOMATIC SETUP (v13.0)
 # ================================================================
 # * WireGuard is installed automatically if missing
 # * Anonymous WARP config is generated via wgcf (no personal info)
@@ -28,6 +28,9 @@
 # - Install-safe (v10.8+): install lock defers outbound blocks until STEP 19; tunnel kept alive on upgrade;
 #   kurtar.bat/ps1 restores internet offline if install is interrupted.
 # - v10.9: strips IPv6 from WARP config; fixes WMI; dedupes monitor; faster tunnel-down block (2s poll).
+# - v13.0 ultimate fail-open: SafeToOpen = tunnel+TCP only (DNS never gates open); BootGrace 180s;
+#   block only after 5x tunnel-down or 15x zombie; repair fail-open on zombie; watchdog graduated;
+#   auto kurtar2 never turns firewall off; unified health across all layers.
 # - v12.3: kurtar2 = full unbrick (stops layers, disables tasks, firewall recovery like Downloads KURTAR2);
 #   UnbrickUntil cooldown stops monitor/repair re-blocking; watchdog auto-invokes kurtar2.
 # - v12.2: tunnel-down debounce (3x/6s before block); repair uses rule-exists not rule-enabled for DNS;
@@ -60,7 +63,7 @@ param(
 )
 # Installer: Continue shows errors without aborting noisy steps; runtime scripts set their own preference.
 $ErrorActionPreference = "Continue"
-$WG_KS_VERSION = '12.3'
+$WG_KS_VERSION = '13.0'
 
 # -- Paths --
 $INSTALL_DIR = "C:\WireGuard"
@@ -473,11 +476,13 @@ if (-not (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')) {
 
 Start-Sleep -Seconds 2
 `$ping = Test-Connection 8.8.8.8 -Count 2 -Quiet
-if (-not `$ping) {
-    Log-K 'Still no ping - turning firewall OFF (Downloads KURTAR2 step)'
+if (-not `$ping -and -not `$FromAuto) {
+    Log-K 'Still no ping - turning firewall OFF (manual kurtar2 only)'
     netsh advfirewall set allprofiles state off 2>`$null | Out-Null
     Start-Sleep -Seconds 2
     `$ping = Test-Connection 8.8.8.8 -Count 2 -Quiet
+} elseif (-not `$ping -and `$FromAuto) {
+    Log-K 'Still no ping - auto mode skips firewall OFF (fail-open)'
 }
 
 `$running = (( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING')
@@ -1074,15 +1079,21 @@ function Test-Internet {
     return (`$hits -ge 2)
 }
 
-function Test-Dns {
-    try {
-        `$r = [System.Net.Dns]::GetHostAddresses('google.com')
-        return (`$r -and `$r.Count -gt 0)
-    } catch { return `$false }
+function Test-SafeToOpen {
+    return (Test-TunnelRunning) -and (Test-Internet)
 }
 
-function Test-SafeToOpen {
-    return (Test-TunnelRunning) -and (Test-Internet) -and (Test-Dns)
+function Test-BootGrace {
+    try {
+        `$reg = Get-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' -Name BootGraceUntil -EA SilentlyContinue
+        if (`$reg.BootGraceUntil -and (Get-Date) -lt [datetime]`$reg.BootGraceUntil) { return `$true }
+    } catch {}
+    return `$false
+}
+
+function Test-BlockAllowed {
+    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace) { return `$false }
+    return `$true
 }
 
 function Enable-DnsLeakProtection {
@@ -1157,8 +1168,8 @@ function Get-ResolvedServerIP {
 }
 
 function Enable-Block {
-    if (Test-InstallInProgress) {
-        Log "Install in progress - block skipped (internet stays open)"
+    if (-not (Test-BlockAllowed)) {
+        Log "Block deferred (install/unbrick/boot-grace) - internet stays open"
         return
     }
     netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>`$null | Out-Null
@@ -1308,8 +1319,11 @@ if (Test-InstallInProgress) {
 
 try {
     `$bootTime = (Get-CimInstance Win32_OperatingSystem -EA Stop).LastBootUpTime
-    if ((Get-Date) -lt `$bootTime.AddSeconds(90)) {
-        Log "Fresh boot detected - extra 15s wait for network stack"
+    `$graceEnd = `$bootTime.AddSeconds(180)
+    if ((Get-Date) -lt `$graceEnd) {
+        New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+        Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'BootGraceUntil' `$graceEnd.ToString('o') -Force
+        Log "Fresh boot - BootGrace until `$(`$graceEnd.ToString('HH:mm:ss')) (no block)"
         Start-Sleep -Seconds 15
     }
 } catch {}
@@ -1319,11 +1333,12 @@ while (`$bootWait -lt 90 -and -not (Test-TunnelRunning)) {
     Start-Sleep -Seconds 3; `$bootWait += 3
 }
 
-if (Test-SafeToOpen) {
+if (Test-SafeToOpen -or Test-BootGrace -or Test-UnbrickActive) {
     `$state = 'open'
     Clear-DnsClientCache -EA SilentlyContinue
     Disable-Block
-    Log "Startup: healthy (waited `${bootWait}s), internet open"
+    if (Test-SafeToOpen) { Log "Startup: healthy (waited `${bootWait}s), internet open" }
+    else { Log "Startup: fail-open hold (boot-grace/unbrick), internet open" }
 } else {
     `$state = 'blocked'
     Enable-Block
@@ -1339,16 +1354,17 @@ if (Test-SafeToOpen) {
 `$script:dedupeTick = 0
 `$script:tamperTick = 0
 `$script:tunnelLostStreak = 0
+`$script:zombieStreak = 0
 
 while (`$true) {
     if (-not `$startupRecovery) { Start-Sleep -Seconds 2 }
     `$startupRecovery = `$false
-    if (Test-UnbrickActive) {
+    if (Test-UnbrickActive -or Test-BootGrace) {
         Disable-Block
         Disable-DnsLeakProtection
         Clear-DnsClientCache -EA SilentlyContinue
         if (`$state -ne 'open') {
-            Log "Unbrick cooldown - holding internet open (no re-block)"
+            Log "Fail-open hold (unbrick/boot-grace) - internet open"
             `$state = 'open'; `$wasOpen = `$true
         }
         Start-Sleep -Seconds 30
@@ -1371,18 +1387,17 @@ while (`$true) {
         }
     }
 
-    if (`$wasOpen) {
-        if (-not (Test-TunnelRunning)) {
-            `$script:tunnelLostStreak++
-            if (`$script:tunnelLostStreak -ge 3) {
-                Log "Tunnel lost while open (confirmed `$(`$script:tunnelLostStreak)x) - block"
-                Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
-                `$script:tunnelLostStreak = 0
-            }
-        } else { `$script:tunnelLostStreak = 0 }
-    }
+    if (`$wasOpen -and -not (Test-TunnelRunning)) {
+        `$script:tunnelLostStreak++
+        if (`$script:tunnelLostStreak -ge 5) {
+            Log "Tunnel lost (confirmed 5x/10s) - block"
+            Enable-Block; `$state = 'blocked'; `$wasOpen = `$false
+            `$script:tunnelLostStreak = 0
+        }
+    } elseif (Test-TunnelRunning) { `$script:tunnelLostStreak = 0 }
 
     if (Test-SafeToOpen) {
+        `$script:zombieStreak = 0
         if (`$state -ne 'open') {
             Clear-DnsClientCache -EA SilentlyContinue
             Disable-Block
@@ -1392,19 +1407,34 @@ while (`$true) {
         } else { `$wasOpen = `$true }
         continue
     }
+
+    if (Test-TunnelRunning) {
+        `$script:zombieStreak++
+        if (`$script:zombieStreak -lt 15) {
+            if (`$script:zombieStreak -eq 1) { Log "Zombie tunnel suspected - waiting 15x before block (fail-open)" }
+            `$wasOpen = `$false
+            Start-Sleep -Seconds 2
+            continue
+        }
+        Log "Zombie tunnel confirmed 15x/30s - block"
+    } else {
+        `$script:zombieStreak = 0
+        Log "Tunnel down - block"
+    }
     `$wasOpen = `$false
 
+    if (-not (Test-BlockAllowed)) {
+        Log "Unhealthy but block deferred (fail-open hold)"
+        continue
+    }
     if (`$state -ne 'blocked') {
-        if (Test-TunnelRunning) {
-            Log "WARNING: Zombie tunnel (running, no internet) - activating block"
-        } else {
-            Log "WARNING: Tunnel down - activating block"
-        }
+        Log "WARNING: Unhealthy - activating block after debounce"
     } elseif (-not (Test-BlockRulePresent)) {
         Log "WARNING: Block rules tampered/missing while unhealthy - re-applying"
     }
     Enable-Block
     `$state = 'blocked'
+    `$script:zombieStreak = 0
 
     Log "Starting recovery"
     `$success = `$false
@@ -1550,14 +1580,20 @@ function Test-Internet {
     return ($hits -ge 2)
 }
 
-function Test-Dns {
+function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) }
+
+function Test-BootGrace {
     try {
-        $r = [System.Net.Dns]::GetHostAddresses('google.com')
-        return ($r -and $r.Count -gt 0)
-    } catch { return $false }
+        $reg = Get-ItemProperty $REG_KEY -Name BootGraceUntil -EA SilentlyContinue
+        if ($reg.BootGraceUntil -and (Get-Date) -lt [datetime]$reg.BootGraceUntil) { return $true }
+    } catch {}
+    return $false
 }
 
-function Test-SafeToOpen { return (Test-TunnelRunning) -and (Test-Internet) -and (Test-Dns) }
+function Test-BlockAllowed {
+    if (Test-InstallInProgress -or Test-UnbrickActive -or Test-BootGrace) { return $false }
+    return $true
+}
 
 function Enable-DnsLeakProtection {
     netsh advfirewall firewall set rule name="KS-DNS-Block" new enable=yes 2>$null | Out-Null
@@ -1685,7 +1721,7 @@ function Get-RepairServerIP {
 }
 
 function Enable-Block {
-    if (Test-InstallInProgress) { return }
+    if (-not (Test-BlockAllowed)) { return }
     $serverIp = Get-RepairServerIP
     netsh advfirewall firewall delete rule name="KS-Block-WiFi-Out"         2>$null | Out-Null
     netsh advfirewall firewall delete rule name="KS-Block-Ethernet-Out"     2>$null | Out-Null
@@ -1709,18 +1745,20 @@ function Disable-Block {
 }
 
 function Sync-KillSwitchState {
-    if (Test-InstallInProgress) {
+    if (-not (Test-BlockAllowed)) {
         Disable-Block
-        Log "Sync: install in progress - block deferred"
+        Log "Sync: fail-open hold - internet open"
         return
     }
     if (Test-SafeToOpen) {
         Disable-Block
         Log "Sync: healthy - internet open"
-    } else {
+    } elseif (-not (Test-TunnelRunning)) {
         Enable-Block
-        if (Test-TunnelRunning) { Log "Sync: zombie tunnel - block active" }
-        else { Log "Sync: tunnel down - block active" }
+        Log "Sync: tunnel down - block active"
+    } else {
+        Disable-Block
+        Log "Sync: zombie tunnel - deferring block to monitor (fail-open)"
     }
 }
 
@@ -1814,11 +1852,11 @@ $PID | Set-Content $LOCK -Force -EA SilentlyContinue
 try {
     if (Test-Path $LOG) { attrib -H -S $LOG 2>$null | Out-Null }
 
-    if (Test-UnbrickActive) {
+    if (Test-UnbrickActive -or Test-BootGrace) {
         Disable-Block
         Disable-DnsLeakProtection
         Clear-DnsClientCache -EA SilentlyContinue
-        Log "Unbrick cooldown - repair skipped (no re-block)"
+        Log "Fail-open hold - repair skipped (no re-block)"
         exit 0
     }
 
@@ -1919,21 +1957,22 @@ Write-Step "STEP 8b - INTERNET WATCHDOG SCRIPT"
 # ================================================================
 $watchdogKsVersion = $WG_KS_VERSION
 $watchdogContent = @"
-# Internet Watchdog v$watchdogKsVersion (auto-generated by install.ps1)
-# Invokes kurtar2.ps1 when internet/DNS down (same as Downloads KURTAR2)
+# Internet Watchdog v$watchdogKsVersion (graduated fail-open - no instant kurtar2)
 `$LOG = '$LOG'
 `$KURTAR2 = '$KURTAR2_PS1'
 `$REG_KEY = 'HKLM:\SOFTWARE\WGKillSwitch'
-`$LAST_RUN = 'C:\WireGuard\watchdog-last-kurtar2.txt'
+`$STUCK_FILE = 'C:\WireGuard\watchdog-stuck.count'
+`$TUNNEL_SVC = '$TUNNEL_SVC'
 `$ErrorActionPreference = 'Continue'
 
 function Log([string]`$m) {
     Add-Content `$LOG "`$(Get-Date -f 'yyyy-MM-dd HH:mm:ss') | [WATCHDOG] `$m" -Encoding UTF8 -EA SilentlyContinue
 }
-function Test-UnbrickActive {
+function Test-HoldActive {
     try {
-        `$reg = Get-ItemProperty `$REG_KEY -Name UnbrickUntil -EA SilentlyContinue
+        `$reg = Get-ItemProperty `$REG_KEY -EA SilentlyContinue
         if (`$reg.UnbrickUntil -and (Get-Date) -lt [datetime]`$reg.UnbrickUntil) { return `$true }
+        if (`$reg.BootGraceUntil -and (Get-Date) -lt [datetime]`$reg.BootGraceUntil) { return `$true }
     } catch {}
     return `$false
 }
@@ -1955,33 +1994,56 @@ function Test-Internet {
     }
     return (`$hits -ge 2)
 }
-function Test-Dns {
-    try {
-        `$r = [System.Net.Dns]::GetHostAddresses('google.com')
-        return (`$r -and `$r.Count -gt 0)
-    } catch { return `$false }
+function Test-TunnelRunning {
+    return ([bool](( & sc.exe query `$TUNNEL_SVC 2>`$null) -match 'RUNNING'))
+}
+function Test-BlockRulePresent {
+    `$o = netsh advfirewall firewall show rule name="KS-Block-WiFi-Out" 2>`$null | Out-String
+    return (`$o -match 'Enabled:\s+Yes')
+}
+function Invoke-GentleUnbrick {
+    foreach (`$r in @('KS-Block-WiFi-Out','KS-Block-Ethernet-Out','KS-Block-RemoteAccess-Out','KS-Block-PPP-Out')) {
+        netsh advfirewall firewall delete rule name="`$r" 2>`$null | Out-Null
+    }
+    netsh advfirewall firewall set rule name="KS-DNS-Block" new enable=no 2>`$null | Out-Null
+    netsh advfirewall firewall set rule name="KS-DNS-Block-TCP" new enable=no 2>`$null | Out-Null
+    Clear-DnsClientCache -EA SilentlyContinue
 }
 
-if (Test-UnbrickActive) { exit 0 }
+if (Test-HoldActive) { exit 0 }
 
 `$tcpOK = Test-Internet
-`$dnsOK = Test-Dns
-if (`$tcpOK -and `$dnsOK) { exit 0 }
+`$tunnel = Test-TunnelRunning
+`$healthy = `$tunnel -and `$tcpOK
 
-# Throttle: max one kurtar2 per 5 minutes from watchdog
-if (Test-Path `$LAST_RUN) {
-    try {
-        `$last = [datetime](Get-Content `$LAST_RUN -EA Stop | Select-Object -First 1)
-        if ((Get-Date) -lt `$last.AddMinutes(5)) { exit 0 }
-    } catch {}
+if (`$healthy) {
+    if (Test-BlockRulePresent) {
+        Log "Healthy but blocks on - gentle unbrick"
+        Invoke-GentleUnbrick
+    }
+    Set-Content `$STUCK_FILE '0' -Force -EA SilentlyContinue
+    exit 0
 }
 
-Log "Internet/DNS down (tcp=`$tcpOK dns=`$dnsOK) - invoking kurtar2.ps1"
-Set-Content `$LAST_RUN (Get-Date).ToString('o') -Force -EA SilentlyContinue
-if (Test-Path `$KURTAR2) {
+`$count = 0
+if (Test-Path `$STUCK_FILE) {
+    try { `$count = [int](Get-Content `$STUCK_FILE -EA Stop | Select-Object -First 1) } catch {}
+}
+`$count++
+Set-Content `$STUCK_FILE "`$count" -Force -EA SilentlyContinue
+
+if (`$count -le 2) {
+    Log "Unhealthy (tunnel=`$tunnel tcp=`$tcpOK) streak=`$count - gentle unbrick"
+    Invoke-GentleUnbrick
+    exit 0
+}
+
+if (`$count -ge 5 -and (Test-Path `$KURTAR2)) {
+    Log "Unhealthy streak=`$count - invoking kurtar2.ps1"
+    Set-Content `$STUCK_FILE '0' -Force -EA SilentlyContinue
     & powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `$KURTAR2 -FromAuto
 } else {
-    Log "kurtar2.ps1 missing at `$KURTAR2"
+    Log "Unhealthy streak=`$count - waiting before kurtar2 (need 5)"
 }
 "@
 Set-Content $WATCHDOG_PS1 $watchdogContent -Encoding UTF8 -Force
@@ -2734,8 +2796,10 @@ Ensure-TunnelForInstall | Out-Null
 Ensure-DelayedAutoStart
 Disable-AllIPv6Bindings
 Write-KurtarScript
+New-Item -Path 'HKLM:\SOFTWARE\WGKillSwitch' -Force | Out-Null
+Set-ItemProperty 'HKLM:\SOFTWARE\WGKillSwitch' 'BootGraceUntil' (Get-Date).AddSeconds(180).ToString('o') -Force
 Clear-InstallLock
-OK "Install lock cleared - kill switch may now block if tunnel fails"
+OK "Install lock cleared - 180s BootGrace (fail-open), then monitor takes over"
 if (Test-Path $NSSM) {
     & $NSSM start $WG_SVC_NAME 2>$null | Out-Null
     Start-Sleep 3
